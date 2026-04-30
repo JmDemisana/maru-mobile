@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "874833976756",
+    "project_id": "maru-helper-259c5",
+    "storage_bucket": "maru-helper-259c5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:874833976756:android:e13f59754870b7ff3fe6e1",
+        "android_client_info": {
+          "package_name": "io.maru.helper"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBb1l9ZPJcfIfa9_HvZDWIY27ajsWxZGJE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

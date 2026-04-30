@@ -1,0 +1,15 @@
+{
+  "name": "maru-mobile",
+  "version": "1.5.42",
+  "description": "Maru Link Service - Android helper app",
+  "author": "Maru",
+  "scripts": {
+    "android:sync": "echo 'Sync from main repo first: npm run build:helper && npx cap sync android'",
+    "android:app:debug": "./android/gradlew :app:assembleDebug",
+    "android:tv:debug": "./android/gradlew :tvapp:assembleDebug",
+    "android:release": "./android/gradlew :app:assembleRelease"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.3.0"
+  }
+}

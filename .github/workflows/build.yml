@@ -1,0 +1,52 @@
+name: Build Mobile App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+      - name: Build Debug APK
+        run: ./android/gradlew :app:assembleDebug
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helper-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Maru Link Service ${{ github.ref_name }}
+          body: |
+            ## Maru Link Service (Helper App)
+
+            Android helper app for Maru ecosystem. Provides:
+            - Notification handling and delivery
+            - Marucast audio streaming controls
+            - Native bridge for Android-specific features
+
+            ### Installation
+            1. Download `app-debug.apk`
+            2. Install on your Android device
+            3. Open the app to configure
+
+            ### Requirements
+            - Android 8.0+ recommended
+            - Internet connection for initial setup
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+android/app/build/
+android/tvapp/build/
+android/capacitor-cordova-android-plugins/build/
+
+# Gradle
+.gradle/
+build/
+
+# Local properties
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# APK files (built artifacts)
+*.apk
+*.aab
+
+# Keystore files
+*.jks
+*.keystore
