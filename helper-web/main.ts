@@ -318,7 +318,11 @@ function renderSettingsPanel() {
 
       <section class="link-settings-group">
         <h2 class="link-settings-heading">Account &amp; Sync</h2>
-        <p class="link-settings-note">Cloud accounts and cross-app sync are coming soon. One login for everything.</p>
+        <div class="link-settings-row">
+          <span>Elevate App</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-elevate">Open</button>
+        </div>
+        <p class="link-settings-note">Open Elevation in your browser to authenticate this device and enable Last.fm helper alerts.</p>
       </section>
     </div>
   `;
@@ -340,6 +344,16 @@ function renderSettingsPanel() {
 
   document.getElementById("settings-open-notif")?.addEventListener("click", () => {
     try { window.HelperNativeBridge?.openNotificationListenerSettings?.(); } catch {}
+  });
+
+  document.getElementById("settings-elevate")?.addEventListener("click", () => {
+    const origin = persistServerOrigin(null) ?? DEFAULT_SITE_ORIGIN;
+    const elevationUrl = `${origin}/elevation`;
+    try {
+      window.HelperNativeBridge?.openExternalUrl?.(elevationUrl);
+    } catch {
+      window.open(elevationUrl, "_blank");
+    }
   });
 }
 

@@ -43,7 +43,7 @@ android {
         variant.outputs.all { output ->
             outputFileName = variant.flavorName == "karaoke"
                 ? "maru-helper-karaoke.apk"
-                : "maru-helper-debug.apk"
+                : "maru-link.apk"
         }
     }
 }

@@ -20,6 +20,9 @@
     "vite": "^7.2.4"
   },
   "dependencies": {
-    "@capacitor/android": "^8.3.1"
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/push-notifications": "^8.0.3"
   }
 }

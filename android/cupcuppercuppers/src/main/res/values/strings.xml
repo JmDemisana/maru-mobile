@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cup-Cupper-Cuppers</string>
+    <string name="title_activity_main">Cup-Cupper-Cuppers</string>
+    <string name="custom_url_scheme">io.maru.cupcuppercuppers</string>
+</resources>

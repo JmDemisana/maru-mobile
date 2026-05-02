@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Dael or No Dael</string>
+    <string name="title_activity_main">Dael or No Dael</string>
+    <string name="custom_url_scheme">io.maru.daelornodael</string>
+</resources>

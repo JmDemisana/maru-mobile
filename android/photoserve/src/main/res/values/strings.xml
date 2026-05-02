@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PhotoServe</string>
+    <string name="title_activity_main">PhotoServe</string>
+    <string name="custom_url_scheme">io.maru.photoserve</string>
+</resources>
