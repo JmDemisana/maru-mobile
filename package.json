@@ -4,12 +4,22 @@
   "description": "Maru Link Service - Android helper app",
   "author": "Maru",
   "scripts": {
-    "android:sync": "echo 'Sync from main repo first: npm run build:helper && npx cap sync android'",
+    "build:web": "vite build",
+    "android:sync": "npm run build:web && npx cap sync android",
     "android:app:debug": "./android/gradlew :app:assembleDebug",
     "android:tv:debug": "./android/gradlew :tvapp:assembleDebug",
-    "android:release": "./android/gradlew :app:assembleRelease"
+    "android:release": "./android/gradlew :app:assembleRelease",
+    "android:photoserve:debug": "./android/gradlew :photoserve:assembleDebug",
+    "android:cupcuppercuppers:debug": "./android/gradlew :cupcuppercuppers:assembleDebug",
+    "android:daelornodael:debug": "./android/gradlew :daelornodael:assembleDebug",
+    "android:tupgradesolver:debug": "./android/gradlew :tupgradesolver:assembleDebug"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.3.0"
+    "@capacitor/cli": "^8.3.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.3.1"
   }
 }

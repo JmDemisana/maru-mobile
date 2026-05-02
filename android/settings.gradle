@@ -1,6 +1,16 @@
 include ':app'
 include ':tvapp'
+include ':applets'
+include ':photoserve'
+include ':cupcuppercuppers'
+include ':daelornodael'
+include ':tupgradesolver'
 include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+project(':applets').projectDir = new File('./applets/')
+project(':photoserve').projectDir = new File('./photoserve/')
+project(':cupcuppercuppers').projectDir = new File('./cupcuppercuppers/')
+project(':daelornodael').projectDir = new File('./daelornodael/')
+project(':tupgradesolver').projectDir = new File('./tupgradesolver/')
 
 apply from: 'capacitor.settings.gradle'
