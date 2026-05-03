@@ -145,6 +145,7 @@ let marucastLinkedReceiverSurface: "desktop-web" | "tv-app" | null = null;
 let marucastLinkedReceiverSurfaceRequestKey: string | null = null;
 let cachedRelease: GitHubRelease | null = null;
 let cachedReleaseAt = 0;
+let cachedApkUrls: Record<string, { url: string; size: string }> = {};
 
 /* ---------- receiver state ---------- */
 
@@ -188,6 +189,37 @@ function normalizeReceiverSurface(value: "desktop-web" | "tv-app" | null | undef
 
 /* ---------- release fetching ---------- */
 
+async function findApkInReleases(apkPatterns: string): Promise<{ url: string; size: string } | null {
+  const patterns = apkPatterns.split(",").map(p => p.trim().toLowerCase());
+  
+  // Check latest release first, fall back to fetching all if needed
+  try {
+    const resp = await CapacitorHttp.get({ url: GITHUB_RELEASES_API, responseType: "json" });
+    const release = resp.data as GitHubRelease | null;
+    if (release?.assets) {
+      const asset = release.assets.find((a) => patterns.some(p => a.name.toLowerCase().includes(p)));
+      if (asset) return { url: asset.browser_download_url, size: formatBytes(asset.size) };
+    }
+  } catch { /* ignore */ }
+  
+  // Not in latest release, paginate through older releases
+  let page = 1;
+  while (page <= 5) {
+    try {
+      const paginatedUrl = `${GITHUB_RELEASES_API}?per_page=5&page=${page}`;
+      const resp = await CapacitorHttp.get({ url: paginatedUrl, responseType: "json" });
+      const releases = (resp.data as GitHubRelease[]) || [];
+      if (releases.length === 0) break;
+      for (const release of releases) {
+        const asset = release.assets.find((a) => patterns.some(p => a.name.toLowerCase().includes(p)));
+        if (asset) return { url: asset.browser_download_url, size: formatBytes(asset.size) };
+      }
+      page++;
+    } catch { break; }
+  }
+  return null;
+}
+
 async function fetchLatestRelease(): Promise<GitHubRelease | null> {
   const now = Date.now();
   if (cachedRelease && now - cachedReleaseAt < 5 * 60 * 1000) return cachedRelease;
@@ -201,14 +233,6 @@ async function fetchLatestRelease(): Promise<GitHubRelease | null> {
     }
   } catch { /* ignore */ }
   return cachedRelease;
-}
-
-function findApkDownload(apkName: string, release: GitHubRelease | null): { url: string; size: string } | null {
-  if (!release) return null;
-  const patterns = apkName.split(",").map(p => p.trim().toLowerCase());
-  const asset = release.assets.find((a) => patterns.some(p => a.name.toLowerCase().includes(p)));
-  if (!asset) return null;
-  return { url: asset.browser_download_url, size: formatBytes(asset.size) };
 }
 
 function formatBytes(bytes: number): string {
@@ -271,26 +295,39 @@ function detectDeviceFormFactor() {
   }
 }
 
-function renderCatalogPanel() {
+async async function renderCatalogPanel() {
   if (!linkContentElement) return;
 
   detectDeviceFormFactor();
   const canInstall = deviceFormFactor === "mobile";
 
   let cardsHtml = APPLET_REGISTRY.map((app) => {
-    const apkInfo = findApkDownload(app.apk, cachedRelease);
     const dl = downloadStates[app.apk];
     let actionHtml = "";
     if (dl?.downloading) {
       actionHtml = `<div class="link-card-meta">Starting download…</div>`;
     } else if (dl?.installPermissionNeeded) {
       actionHtml = `<div class="link-card-meta" style="color:rgba(255,191,92,0.9)">Enable 'Install unknown apps' for Maru Link in Settings</div>`;
-    } else if (apkInfo) {
-      actionHtml = canInstall
-        ? `<div class="link-card-meta">${apkInfo.size} · <a href="${escapeHtml(apkInfo.url)}" class="link-download-link" data-apk-download="${escapeHtml(app.apk)}" data-apk-url="${escapeHtml(apkInfo.url)}">Download & Install</a></div>`
-        : `<div class="link-card-meta">Not available on TV</div>`;
     } else {
-      actionHtml = `<div class="link-card-meta">Coming soon</div>`;
+      // Check cached URL first, otherwise fetch it
+      const cachedInfo = cachedApkUrls[app.apk];
+      if (cachedInfo) {
+        actionHtml = canInstall
+          ? `<div class="link-card-meta">${cachedInfo.size} · <a href="${escapeHtml(cachedInfo.url)}" class="link-download-link" data-apk-download="${escapeHtml(app.apk)}" data-apk-url="${escapeHtml(cachedInfo.url)}">Download & Install</a></div>`
+          : `<div class="link-card-meta">Not available on TV</div>`;
+      } else {
+        // Fetch in background if not cached
+        actionHtml = `<div class="link-card-meta">Checking…</div>`;
+        void findApkInReleases(app.apk).then((info) => {
+          if (info) {
+            cachedApkUrls[app.apk] = info;
+            if (activePanel === "catalog") renderCatalogPanel();
+          } else {
+            cachedApkUrls[app.apk] = null as any;
+            if (activePanel === "catalog") renderCatalogPanel();
+          }
+        });
+      }
     }
 
     return `
@@ -1150,7 +1187,11 @@ async function completeLinkFlow(rawUrl: string) {
 
 function renderDefaultPanel() {
   switchPanel("catalog");
-  void fetchLatestRelease().then(() => { if (activePanel === "catalog") renderCatalogPanel(); });
+  // Pre-fetch all APK URLs in background
+  void Promise.all(APPLET_REGISTRY.map(app => findApkInReleases(app.apk))).then(results => {
+    APPLET_REGISTRY.forEach((app, i) => { if (results[i]) cachedApkUrls[app.apk] = results[i]; });
+    if (activePanel === "catalog") renderCatalogPanel();
+  });
 }
 
 async function initializeLink() {
