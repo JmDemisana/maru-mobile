@@ -443,6 +443,33 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void downloadStemModel(String rawUrl) {
+            if (rawUrl == null || rawUrl.trim().isEmpty()) {
+                return;
+            }
+
+            Uri parsedUrl = Uri.parse(rawUrl.trim());
+            DownloadManager downloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            if (downloadManager == null) return;
+
+            // Save to internal files dir, not Downloads
+            File modelsDir = new File(getFilesDir(), "models");
+            if (!modelsDir.exists()) {
+                modelsDir.mkdirs();
+            }
+            File outputFile = new File(modelsDir, "2stems.tflite");
+
+            DownloadManager.Request request = new DownloadManager.Request(parsedUrl);
+            request.setTitle("Maru Stem Model");
+            request.setDescription("Downloading karaoke stem model");
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationUri(Uri.fromFile(outputFile));
+            request.setMimeType("application/octet-stream");
+
+            downloadManager.enqueue(request);
+        }
+
+        @JavascriptInterface
         public boolean canInstallUnknownApps() {
             if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
                 return true;

@@ -111,6 +111,7 @@ declare global {
       toggleLauncherIconAndGetState?: () => string;
       installApkFromUrl?: (url: string, filename: string) => string;
       downloadApk?: (url: string, filename: string) => void;
+      downloadStemModel?: (url: string) => void;
       getDeviceFormFactor?: () => string;
       canInstallApks?: () => boolean;
       canInstallUnknownApps?: () => boolean;
@@ -492,16 +493,16 @@ function renderSettingsPanel() {
       <section class="link-settings-group">
         <h2 class="link-settings-heading">Marucast</h2>
         <div class="link-settings-row">
-          <span>Stem file</span>
-          <button type="button" class="link-btn link-btn-subtle" id="settings-import-stem">Import</button>
-        </div>
-        <div class="link-settings-row">
           <span>Karaoke model</span>
-          <span class="link-settings-value" id="settings-stem-status">Not loaded</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-download-stem">Download</button>
         </div>
         <div class="link-settings-row">
+          <span>Karaoke status</span>
+          <span className="link-settings-value" id="settings-stem-status">Not loaded</span>
+        </div>
+        <div className="link-settings-row">
           <span>Notification Access</span>
-          <button type="button" class="link-btn link-btn-subtle" id="settings-open-notif">Open</button>
+          <button type="button" className="link-btn link-btn-subtle" id="settings-open-notif">Open</button>
         </div>
       </section>
 
@@ -535,8 +536,9 @@ function renderSettingsPanel() {
     startLinkUpdateDownload();
   });
 
-  document.getElementById("settings-import-stem")?.addEventListener("click", () => {
-    try { window.HelperNativeBridge?.pickMarucastAudioFile?.(); } catch {}
+  document.getElementById("settings-download-stem")?.addEventListener("click", () => {
+    const stemUrl = "https://github.com/JmDemisana/maru-mobile/releases/latest/download/2stems.tflite";
+    window.HelperNativeBridge?.downloadStemModel?.(stemUrl);
   });
 
   document.getElementById("settings-open-notif")?.addEventListener("click", () => {

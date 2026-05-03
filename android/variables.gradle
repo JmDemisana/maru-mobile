@@ -12,7 +12,7 @@
 // SDK versions - change these to target different Android API levels
 ext {
     minSdkVersion = 24            // Android 7.0 Nougat (2016) - minimum supported version
-    compileSdkVersion = 36         // Android 16 - latest SDK for building
+    compileSdkVersion = 36        // Android 16 - latest SDK for building
     targetSdkVersion = 36          // Target API level (match compileSdkVersion for best compatibility)
     androidxActivityVersion = '1.11.0'
     androidxAppCompatVersion = '1.7.1'

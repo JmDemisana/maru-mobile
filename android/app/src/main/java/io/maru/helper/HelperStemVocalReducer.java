@@ -505,6 +505,20 @@ final class HelperStemVocalReducer {
     }
 
     private ByteBuffer loadModelFile() throws IOException {
+        // First try loading from internal storage (downloaded by user)
+        final File stemModelFile = new File(appContext.getFilesDir(), "2stems.tflite");
+        if (stemModelFile.exists()) {
+            try (FileInputStream inputStream = new FileInputStream(stemModelFile);
+                 FileChannel fileChannel = inputStream.getChannel()) {
+                return fileChannel.map(
+                    FileChannel.MapMode.READ_ONLY,
+                    0,
+                    stemModelFile.length()
+                );
+            }
+        }
+
+        // Fallback: load from bundled assets
         try {
             AssetFileDescriptor fileDescriptor = appContext.getAssets().openFd(MODEL_ASSET_PATH);
             try (AssetFileDescriptor activeDescriptor = fileDescriptor;
