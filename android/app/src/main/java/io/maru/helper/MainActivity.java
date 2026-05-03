@@ -17,6 +17,8 @@ import android.view.KeyEvent;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
+import java.io.File;
+
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
