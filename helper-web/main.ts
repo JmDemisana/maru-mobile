@@ -455,28 +455,22 @@ let updateState: { checking: boolean; available: boolean; downloading: boolean; 
 };
 
 function checkForUpdate(installedVersion: string) {
-  if (!cachedRelease) {
-    updateState.checking = true;
-    renderSettingsPanel();
-    void fetchLatestRelease().then((release) => {
-      if (release && isNewerVersion(release.tag_name, installedVersion)) {
-        const linkApk = findApkDownload("link,helper", release);
+  updateState.checking = true;
+  renderSettingsPanel();
+  void fetchLatestRelease().then((release) => {
+    if (release && isNewerVersion(release.tag_name, installedVersion)) {
+      void findApkInReleases("link,helper").then((linkApk) => {
         updateState.available = !!linkApk;
         updateState.latestVersion = release.tag_name;
         updateState.downloadUrl = linkApk?.url ?? "";
-      }
+        updateState.checking = false;
+        renderSettingsPanel();
+      });
+    } else {
       updateState.checking = false;
       renderSettingsPanel();
-    });
-    return;
-  }
-  if (isNewerVersion(cachedRelease.tag_name, installedVersion)) {
-    const linkApk = findApkDownload("link,helper", cachedRelease);
-    updateState.available = !!linkApk;
-    updateState.latestVersion = cachedRelease.tag_name;
-    updateState.downloadUrl = linkApk?.url ?? "";
-  }
-  updateState.checking = false;
+    }
+  });
 }
 
 function startLinkUpdateDownload() {
