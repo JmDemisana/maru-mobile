@@ -861,7 +861,7 @@ public final class MarucastSenderManager {
     }
 
     private void prepareStemReducerLocked() {
-        if (appContext == null || !BuildConfig.MARUCAST_KARAOKE_ENABLED) {
+        if (appContext == null) {
             return;
         }
         if (stemVocalReducer == null) {
@@ -1381,11 +1381,6 @@ public final class MarucastSenderManager {
                         : "Marucast could not reach the current media controls.";
                     break;
                 case "vocal-remove":
-                    if (!BuildConfig.MARUCAST_KARAOKE_ENABLED) {
-                        success = false;
-                        message = "This helper build doesn't include Karaoke.";
-                        break;
-                    }
                     if (stemVocalReducer == null || !stemVocalReducer.isModelReady()) {
                         String reducerError =
                             stemVocalReducer == null
@@ -1414,16 +1409,6 @@ public final class MarucastSenderManager {
                             " seconds of delay while the helper pre-buffers a cleaner accompaniment mix.";
                     break;
                 case "vocal-normal":
-                    if (!BuildConfig.MARUCAST_KARAOKE_ENABLED) {
-                        if (!VOCAL_MODE_NORMAL.equals(vocalMode)) {
-                            vocalMode = VOCAL_MODE_NORMAL;
-                            markVocalProcessingStateChangedLocked();
-                        }
-                        lastError = null;
-                        success = true;
-                        message = "This helper build uses the normal mix only.";
-                        break;
-                    }
                     if (!VOCAL_MODE_NORMAL.equals(vocalMode)) {
                         vocalMode = VOCAL_MODE_NORMAL;
                         markVocalProcessingStateChangedLocked();
@@ -2004,13 +1989,10 @@ public final class MarucastSenderManager {
         JSONObject payload = new JSONObject();
         boolean wifiConnected = enforceWifiRequirementLocked();
         String wifiRequirementMessage = wifiConnected ? null : getWifiRequirementMessageLocked();
-        boolean karaokeEnabled = BuildConfig.MARUCAST_KARAOKE_ENABLED;
+        boolean karaokeEnabled = stemVocalReducer != null && stemVocalReducer.isModelReady();
         Integer karaokeDelayMs =
-            karaokeEnabled && stemVocalReducer != null
-                ? stemVocalReducer.getEstimatedOutputDelayMs()
-                : null;
-        boolean stemModelReady =
-            karaokeEnabled && stemVocalReducer != null && stemVocalReducer.isModelReady();
+            karaokeEnabled ? stemVocalReducer.getEstimatedOutputDelayMs() : null;
+        boolean stemModelReady = karaokeEnabled;
         String localIp = wifiConnected ? getLocalIpAddressLocked() : null;
         String fileStreamUrl = buildFileStreamUrlLocked(localIp);
         String liveStreamUrl = buildLiveStreamUrlLocked(localIp);

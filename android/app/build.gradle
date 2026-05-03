@@ -15,19 +15,8 @@ android {
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
-    }
-    flavorDimensions "helperTier"
-    productFlavors {
-        regular {
-            dimension "helperTier"
-            buildConfigField "boolean", "MARUCAST_KARAOKE_ENABLED", "false"
-        }
-        karaoke {
-            dimension "helperTier"
-            buildConfigField "boolean", "MARUCAST_KARAOKE_ENABLED", "true"
-            ndk {
-                abiFilters "arm64-v8a"
-            }
+        ndk {
+            abiFilters "arm64-v8a"
         }
     }
     buildTypes {
@@ -41,9 +30,7 @@ android {
     }
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            outputFileName = variant.flavorName == "karaoke"
-                ? "maru-helper-karaoke.apk"
-                : "maru-link.apk"
+            outputFileName = "maru-link.apk"
         }
     }
 }
@@ -62,7 +49,7 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.work:work-runtime:$androidxWorkVersion"
     implementation "org.tensorflow:tensorflow-lite:2.16.1"
-    karaokeImplementation "org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1"
+    implementation "org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

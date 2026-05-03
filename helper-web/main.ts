@@ -22,10 +22,10 @@ const MARUCAST_STATUS_POLL_MS = 320;
 const GITHUB_RELEASES_API = "https://api.github.com/repos/JmDemisana/maru-mobile/releases/latest";
 
 const APPLET_REGISTRY = [
-  { id: "photoserve", name: "PhotoServe", desc: "Desktop print workstation for 4R photo layouts and export.", apk: "maru-photoserve.apk", icon: "📸" },
-  { id: "cupcuppercuppers", name: "Cup-Cupper-Cuppers", desc: "Case-picking shell game — pick the cup that wins.", apk: "maru-cupcuppercuppers.apk", icon: "🎲" },
-  { id: "daelornodael", name: "Dael or No Dael", desc: "Deal or No Deal clone with banker offers and swaps.", apk: "maru-daelornodael.apk", icon: "💼" },
-  { id: "tupgradesolver", name: "TUP Grade Solver", desc: "Score-target calculator for TUP grading.", apk: "maru-tupgradesolver.apk", icon: "📊" },
+  { id: "photoserve", name: "PhotoServe", desc: "Desktop print workstation for 4R photo layouts and export.", apk: "maru-photoserve.apk", icon: "icons/applet-photo-serve.svg" },
+  { id: "cupcuppercuppers", name: "Cup-Cupper-Cuppers", desc: "Case-picking shell game — pick the cup that wins.", apk: "maru-cupcuppercuppers.apk", icon: "icons/applet-cup-cupper-cuppers.svg" },
+  { id: "daelornodael", name: "Dael or No Dael", desc: "Deal or No Deal clone with banker offers and swaps.", apk: "maru-daelornodael.apk", icon: "icons/applet-dael.svg" },
+  { id: "tupgradesolver", name: "TUP Grade Solver", desc: "Score-target calculator for TUP grading.", apk: "maru-tupgradesolver.apk", icon: "icons/applet-tup-grade.svg" },
 ];
 
 /* ---------- types ---------- */
@@ -110,6 +110,17 @@ declare global {
       stopMarucastSender?: () => string;
       toggleLauncherIconAndGetState?: () => string;
       installApkFromUrl?: (url: string, filename: string) => string;
+      downloadApk?: (url: string, filename: string) => void;
+      getDeviceFormFactor?: () => string;
+      canInstallApks?: () => boolean;
+      canInstallUnknownApps?: () => boolean;
+      getMarucastReceiverStatus?: () => string;
+      startMarucastReceiverDiscovery?: () => string;
+      stopMarucastReceiverDiscovery?: () => string;
+      getMarucastDiscoveredSenders?: () => string;
+      connectMarucastReceiver?: (host: string, port: number, senderName: string) => string;
+      disconnectMarucastReceiver?: () => string;
+      setMarucastReceiverVolume?: (volume: number) => string;
     };
   }
 }
@@ -121,7 +132,7 @@ let isLinking = false;
 let lastProcessedLinkToken: string | null = null;
 let marucastStatusPollId: number | null = null;
 let marucastIdleWithoutReceiverStartedAt: number | null = null;
-let activePanel: "catalog" | "marucast" | "settings" = "catalog";
+let activePanel: "catalog" | "marucast" | "settings" | "receiver" = "catalog";
 let marucastPanelContext: {
   openUrl: string;
   receiverToken: string | null;
@@ -133,6 +144,15 @@ let marucastLinkedReceiverSurface: "desktop-web" | "tv-app" | null = null;
 let marucastLinkedReceiverSurfaceRequestKey: string | null = null;
 let cachedRelease: GitHubRelease | null = null;
 let cachedReleaseAt = 0;
+
+/* ---------- receiver state ---------- */
+
+type DiscoveredSender = { name: string; host: string; port: number; code: string; mode: string; title: string };
+type ReceiverStatus = { connected: boolean; senderName: string; senderHost: string; senderPort: number; pairingCode: string; volume: number; discovering: boolean; lastError: string };
+
+let receiverStatus: ReceiverStatus = { connected: false, senderName: "", senderHost: "", senderPort: 0, pairingCode: "", volume: 1, discovering: false, lastError: "" };
+let discoveredSenders: DiscoveredSender[] = [];
+let receiverPollId: number | null = null;
 
 /* ---------- helpers ---------- */
 
@@ -184,7 +204,8 @@ async function fetchLatestRelease(): Promise<GitHubRelease | null> {
 
 function findApkDownload(apkName: string, release: GitHubRelease | null): { url: string; size: string } | null {
   if (!release) return null;
-  const asset = release.assets.find((a) => a.name === apkName);
+  const patterns = apkName.split(",").map(p => p.trim().toLowerCase());
+  const asset = release.assets.find((a) => patterns.some(p => a.name.toLowerCase().includes(p)));
   if (!asset) return null;
   return { url: asset.browser_download_url, size: formatBytes(asset.size) };
 }
@@ -194,63 +215,86 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+let currentAppVersion = "0.0.2";
+
+function parseVersion(raw: string): number[] {
+  return raw.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+}
+
+function isNewerVersion(latest: string, current: string): boolean {
+  const a = parseVersion(latest);
+  const b = parseVersion(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
 /* ---------- catalog panel ---------- */
 
-let downloadStates: Record<string, { progress: number; error?: string; installing?: boolean }> = {};
+let downloadStates: Record<string, { downloading: boolean; installPermissionNeeded?: boolean }> = {};
+let deviceFormFactor: "mobile" | "tv" | "tv-remote" = "mobile";
 
 function startApkDownload(apkName: string, url: string) {
-  downloadStates[apkName] = { progress: 0 };
+  if (!window.HelperNativeBridge?.canInstallApks?.()) {
+    return;
+  }
+  if (!window.HelperNativeBridge?.canInstallUnknownApps?.()) {
+    downloadStates[apkName] = { downloading: false, installPermissionNeeded: true };
+    renderCatalogPanel();
+    setTimeout(() => {
+      delete downloadStates[apkName];
+      renderCatalogPanel();
+    }, 6000);
+    return;
+  }
+  downloadStates[apkName] = { downloading: true };
   renderCatalogPanel();
-  void (async () => {
-    try {
-      downloadStates[apkName] = { progress: 10 };
-      renderCatalogPanel();
-      const nativeInstall = window.HelperNativeBridge?.installApkFromUrl?.(url, apkName);
-      if (nativeInstall) {
-        downloadStates[apkName] = { progress: 100, installing: true };
-        renderCatalogPanel();
-        return;
-      }
-      const resp = await CapacitorHttp.get({ url, responseType: "blob" });
-      downloadStates[apkName] = { progress: 60 };
-      renderCatalogPanel();
-      const blob = resp.data as Blob;
-      const fileUrl = URL.createObjectURL(blob);
-      try { window.HelperNativeBridge?.openExternalUrl?.(url); } catch {
-        window.open(url, "_system");
-      }
-      downloadStates[apkName] = { progress: 100 };
-      renderCatalogPanel();
-      setTimeout(() => { delete downloadStates[apkName]; renderCatalogPanel(); }, 3000);
-    } catch {
-      downloadStates[apkName] = { progress: 0, error: "Download failed. Try again." };
-      renderCatalogPanel();
-    }
-  })();
+  /* Hand off to Android DownloadManager for background download with system notification */
+  window.HelperNativeBridge?.downloadApk?.(url, apkName);
+  setTimeout(() => {
+    delete downloadStates[apkName];
+    renderCatalogPanel();
+  }, 3000);
+}
+
+function detectDeviceFormFactor() {
+  const factor = window.HelperNativeBridge?.getDeviceFormFactor?.();
+  if (factor === "tv" || factor === "tv-remote") {
+    deviceFormFactor = factor as "tv" | "tv-remote";
+  } else {
+    deviceFormFactor = "mobile";
+  }
 }
 
 function renderCatalogPanel() {
   if (!linkContentElement) return;
 
+  detectDeviceFormFactor();
+  const canInstall = deviceFormFactor === "mobile";
+
   let cardsHtml = APPLET_REGISTRY.map((app) => {
     const apkInfo = findApkDownload(app.apk, cachedRelease);
     const dl = downloadStates[app.apk];
     let actionHtml = "";
-    if (dl?.installing) {
-      actionHtml = `<div class="link-card-meta">Installing...</div>`;
-    } else if (dl?.error) {
-      actionHtml = `<div class="link-card-meta" style="color: rgba(255,140,140,0.9)">${escapeHtml(dl.error)} <a href="#" class="link-download-link" data-apk-download="${escapeHtml(app.apk)}">Retry</a></div>`;
-    } else if (dl && dl.progress > 0 && dl.progress < 100) {
-      actionHtml = `<div class="link-card-meta">Downloading... ${dl.progress}%</div>`;
+    if (dl?.downloading) {
+      actionHtml = `<div class="link-card-meta">Starting download…</div>`;
+    } else if (dl?.installPermissionNeeded) {
+      actionHtml = `<div class="link-card-meta" style="color:rgba(255,191,92,0.9)">Enable 'Install unknown apps' for Maru Link in Settings</div>`;
     } else if (apkInfo) {
-      actionHtml = `<div class="link-card-meta">${apkInfo.size} · <a href="${escapeHtml(apkInfo.url)}" class="link-download-link" data-apk-download="${escapeHtml(app.apk)}" data-apk-url="${escapeHtml(apkInfo.url)}">Download & Install</a></div>`;
+      actionHtml = canInstall
+        ? `<div class="link-card-meta">${apkInfo.size} · <a href="${escapeHtml(apkInfo.url)}" class="link-download-link" data-apk-download="${escapeHtml(app.apk)}" data-apk-url="${escapeHtml(apkInfo.url)}">Download & Install</a></div>`
+        : `<div class="link-card-meta">Not available on TV</div>`;
     } else {
       actionHtml = `<div class="link-card-meta">Coming soon</div>`;
     }
 
     return `
       <article class="link-card">
-        <div class="link-card-icon">${app.icon}</div>
+        <div class="link-card-icon"><img src="${escapeHtml(app.icon)}" alt="${escapeHtml(app.name)}" class="link-card-icon-img" /></div>
         <div class="link-card-body">
           <h3 class="link-card-name">${escapeHtml(app.name)}</h3>
           <p class="link-card-desc">${escapeHtml(app.desc)}</p>
@@ -260,11 +304,48 @@ function renderCatalogPanel() {
     `;
   }).join("");
 
+  let thirdPartyHtml = "";
+  if (canInstall) {
+    const THIRD_PARTY_APPS = [
+      { name: "ReVanced Manager Plus", desc: "Patched YouTube client with sponsor-block, ad-free playback, and more.", url: "https://vanced.to/revanced-manager/", icon: "🔧" },
+      { name: "CloudStream", desc: "Stream movies and shows from extension sources.", url: "https://github.com/recloudstream/cloudstream/releases", icon: "☁️", tip: 'Try extension shortcode "phisherrepo"' },
+    ];
+
+    thirdPartyHtml = THIRD_PARTY_APPS.map((app) => `
+      <article class="link-card link-card-external">
+        <div class="link-card-icon">${app.icon}</div>
+        <div class="link-card-body">
+          <h3 class="link-card-name">${escapeHtml(app.name)}</h3>
+          <p class="link-card-desc">${escapeHtml(app.desc)}</p>
+          <div class="link-card-meta">
+            <a href="${escapeHtml(app.url)}" class="link-download-link" data-third-party-url="${escapeHtml(app.url)}">Open Download Page ↗</a>
+          </div>
+          ${app.tip ? `<div class="link-card-tip">${escapeHtml(app.tip)}</div>` : ""}
+        </div>
+      </article>
+    `).join("");
+  }
+
+  const tvNoticeHtml = !canInstall
+    ? `<div class="link-tv-notice">This is a TV device. Mobile app installations are blocked for compatibility reasons.</div>`
+    : "";
+
+  const communitySectionHtml = canInstall
+    ? `<div class="link-community-section">
+        <h2 class="link-community-heading">Community Picks</h2>
+        <p class="link-community-disclaimer">These apps are not affiliated with or sponsored by Maru. We cannot guarantee the safety or quality of these files — download and use at your own discretion.</p>
+        <div class="link-catalog-grid">${thirdPartyHtml}</div>
+      </div>`
+    : "";
+
   linkContentElement.innerHTML = `
     <div class="link-panel">
       <h1 class="link-panel-title">App Catalog</h1>
-      <p class="link-panel-sub">Download and manage your Maru apps. Each app needs Maru Link installed to run.</p>
+      <p class="link-panel-sub">${canInstall ? "Download and manage your Maru apps. Each app needs Maru Link installed to run." : "Browse available apps. Downloads are restricted on this TV device."}</p>
+      ${tvNoticeHtml}
       <div class="link-catalog-grid">${cardsHtml}</div>
+
+      ${communitySectionHtml}
     </div>
   `;
 
@@ -276,12 +357,115 @@ function renderCatalogPanel() {
       if (apkName && apkUrl) startApkDownload(apkName, apkUrl);
     });
   });
+
+  document.querySelectorAll<HTMLElement>("[data-third-party-url]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const url = link.getAttribute("data-third-party-url") ?? "";
+      if (url) {
+        try { window.HelperNativeBridge?.openExternalUrl?.(url); } catch {
+          window.open(url, "_blank");
+        }
+      }
+    });
+  });
+}
+
+/* ---------- TV remote handling ---------- */
+
+let tvFocusIndex = -1;
+
+function handleTvRemoteKey(keyCode: number) {
+  /* D-pad navigation: 19=left, 20=down, 21=right, 22=up, 23=center/enter */
+  const focusable = document.querySelectorAll<HTMLElement>(
+    ".link-card, .link-btn, .link-download-link, .link-nav-btn"
+  );
+  if (focusable.length === 0) return;
+
+  if (keyCode === 23) {
+    /* Enter/OK key */
+    if (tvFocusIndex >= 0 && tvFocusIndex < focusable.length) {
+      focusable[tvFocusIndex].click();
+    }
+    return;
+  }
+
+  if (keyCode === 19 || keyCode === 20 || keyCode === 21 || keyCode === 22) {
+    if (tvFocusIndex < 0) tvFocusIndex = 0;
+    else if (keyCode === 20 || keyCode === 21) tvFocusIndex = (tvFocusIndex + 1) % focusable.length;
+    else if (keyCode === 19 || keyCode === 22) tvFocusIndex = (tvFocusIndex - 1 + focusable.length) % focusable.length;
+
+    focusable.forEach((el, i) => {
+      el.style.outline = i === tvFocusIndex ? "2px solid rgba(122, 155, 255, 0.9)" : "";
+    });
+    focusable[tvFocusIndex].scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+function initTvRemoteHandling() {
+  (window as any).__tvRemoteKeyPressed = handleTvRemoteKey;
 }
 
 /* ---------- settings panel ---------- */
 
+let updateState: { checking: boolean; available: boolean; downloading: boolean; latestVersion: string; downloadUrl: string } = {
+  checking: true,
+  available: false,
+  downloading: false,
+  latestVersion: "",
+  downloadUrl: "",
+};
+
+function checkForUpdate(installedVersion: string) {
+  if (!cachedRelease) {
+    updateState.checking = true;
+    renderSettingsPanel();
+    void fetchLatestRelease().then((release) => {
+      if (release && isNewerVersion(release.tag_name, installedVersion)) {
+        const linkApk = findApkDownload("link,helper", release);
+        updateState.available = !!linkApk;
+        updateState.latestVersion = release.tag_name;
+        updateState.downloadUrl = linkApk?.url ?? "";
+      }
+      updateState.checking = false;
+      renderSettingsPanel();
+    });
+    return;
+  }
+  if (isNewerVersion(cachedRelease.tag_name, installedVersion)) {
+    const linkApk = findApkDownload("link,helper", cachedRelease);
+    updateState.available = !!linkApk;
+    updateState.latestVersion = cachedRelease.tag_name;
+    updateState.downloadUrl = linkApk?.url ?? "";
+  }
+  updateState.checking = false;
+}
+
+function startLinkUpdateDownload() {
+  if (!updateState.downloadUrl) return;
+  updateState.downloading = true;
+  renderSettingsPanel();
+  window.HelperNativeBridge?.downloadApk?.(updateState.downloadUrl, "maru-link.apk");
+  setTimeout(() => {
+    updateState.downloading = false;
+    renderSettingsPanel();
+  }, 3000);
+}
+
 function renderSettingsPanel() {
   if (!linkContentElement) return;
+
+  const updateStatusHtml = updateState.checking
+    ? `<span class="link-settings-value" style="opacity:0.5">Checking…</span>`
+    : updateState.downloading
+    ? `<span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Downloading…</span>`
+    : updateState.available
+    ? `<span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Update available: ${escapeHtml(updateState.latestVersion)}</span>`
+    : `<span class="link-settings-value" style="opacity:0.45">Up to date</span>`;
+
+  const updateButtonHtml = updateState.available && !updateState.downloading
+    ? `<div class="link-settings-row"><span></span><button type="button" class="link-btn link-btn-update" id="settings-update-btn">Download Update</button></div>`
+    : "";
 
   linkContentElement.innerHTML = `
     <div class="link-panel">
@@ -294,6 +478,11 @@ function renderSettingsPanel() {
           <span>Version</span>
           <span class="link-settings-value" id="settings-version">—</span>
         </div>
+        <div class="link-settings-row">
+          <span>Updates</span>
+          ${updateStatusHtml}
+        </div>
+        ${updateButtonHtml}
         <div class="link-settings-row">
           <span>Installation ID</span>
           <span class="link-settings-value" id="settings-install-id">—</span>
@@ -327,16 +516,24 @@ function renderSettingsPanel() {
     </div>
   `;
 
-  /* Fetch version from Capacitor */
+  /* Fetch version from Capacitor and check for updates */
   CapacitorApp.getInfo().then((info) => {
+    const version = info.version || "0.0.2";
+    currentAppVersion = version;
     const el = document.getElementById("settings-version");
-    if (el) el.textContent = info.version || "0.0.2";
+    if (el) el.textContent = version;
+    checkForUpdate(version);
   }).catch(() => {
     const el = document.getElementById("settings-version");
-    if (el) el.textContent = "0.0.2";
+    if (el) el.textContent = currentAppVersion;
+    checkForUpdate(currentAppVersion);
   });
 
   document.getElementById("settings-install-id")!.textContent = getLinkInstallationId().slice(0, 8) + "…";
+
+  document.getElementById("settings-update-btn")?.addEventListener("click", () => {
+    startLinkUpdateDownload();
+  });
 
   document.getElementById("settings-import-stem")?.addEventListener("click", () => {
     try { window.HelperNativeBridge?.pickMarucastAudioFile?.(); } catch {}
@@ -626,6 +823,192 @@ function handleMarucastPanelAction(rawAction: string | null | undefined) {
   }
 }
 
+/* ---------- TV receiver panel ---------- */
+
+function getReceiverStatus(): ReceiverStatus | null {
+  return parseBridgeJson<ReceiverStatus>(window.HelperNativeBridge?.getMarucastReceiverStatus?.());
+}
+
+function refreshDiscoveredSenders() {
+  const raw = window.HelperNativeBridge?.getMarucastDiscoveredSenders?.();
+  if (raw) {
+    try { discoveredSenders = JSON.parse(raw) as DiscoveredSender[]; } catch { discoveredSenders = []; }
+  }
+}
+
+function startReceiverDiscovery() {
+  window.HelperNativeBridge?.startMarucastReceiverDiscovery?.();
+  renderReceiverPanel();
+}
+
+function stopReceiverDiscovery() {
+  window.HelperNativeBridge?.stopMarucastReceiverDiscovery?.();
+  renderReceiverPanel();
+}
+
+function connectToSender(host: string, port: number, name: string) {
+  window.HelperNativeBridge?.connectMarucastReceiver?.(host, port, name);
+  renderReceiverPanel();
+}
+
+function disconnectReceiver() {
+  window.HelperNativeBridge?.disconnectMarucastReceiver?.();
+  renderReceiverPanel();
+}
+
+function startReceiverPolling() {
+  if (receiverPollId !== null) return;
+  receiverPollId = window.setInterval(() => {
+    if (activePanel !== "receiver") { stopReceiverPolling(); return; }
+    refreshReceiverState();
+  }, 2000);
+  refreshReceiverState();
+}
+
+function stopReceiverPolling() {
+  if (receiverPollId !== null) { window.clearInterval(receiverPollId); receiverPollId = null; }
+}
+
+function refreshReceiverState() {
+  const s = getReceiverStatus();
+  if (s) {
+    receiverStatus = s;
+    refreshDiscoveredSenders();
+    renderReceiverPanel();
+  }
+}
+
+function renderReceiverPanel() {
+  if (!linkContentElement) return;
+
+  refreshDiscoveredSenders();
+  const s = receiverStatus;
+  const isConn = s.connected;
+  const isDisc = s.discovering;
+
+  let statusDotClass = "";
+  let statusText = "";
+  if (isConn) { statusDotClass = "connected"; statusText = "Connected to " + (s.senderName || "sender"); }
+  else if (isDisc) { statusDotClass = "scanning"; statusText = "Scanning for senders…"; }
+  else if (s.lastError) { statusDotClass = "error"; statusText = s.lastError; }
+  else { statusText = "Ready — tap Scan to find senders"; }
+
+  const controlsHtml = isConn
+    ? `<div class="link-receiver-controls">
+        <span class="link-receiver-sender-label"><strong>${escapeHtml(s.senderName)}</strong></span>
+        <div class="link-receiver-volume-row">
+          <label for="receiver-volume">Vol</label>
+          <input type="range" class="link-receiver-volume-slider" id="receiver-volume" min="0" max="1" step="0.05" value="${s.volume}">
+          <span class="link-receiver-volume-pct">${Math.round(s.volume * 100)}%</span>
+        </div>
+        <button type="button" class="link-btn link-receiver-disconnect-btn" id="receiver-disconnect-btn">Disconnect</button>
+      </div>`
+    : "";
+
+  const senderListHtml = discoveredSenders.length > 0
+    ? discoveredSenders.map((sender) => {
+        const isThis = isConn && s.senderHost === sender.host && s.senderPort === sender.port;
+        return `
+          <div class="link-sender-row ${isThis ? "selected" : ""}">
+            <span class="link-sender-name">${escapeHtml(sender.title || sender.name)}</span>
+            <span class="link-sender-detail">${escapeHtml(sender.host)}:${sender.port}</span>
+            ${isThis
+              ? '<span class="link-sender-status connected-label">Connected</span>'
+              : `<a href="#" class="link-sender-status connect-link" data-receiver-connect-host="${escapeHtml(sender.host)}" data-receiver-connect-port="${sender.port}" data-receiver-connect-name="${escapeHtml(sender.name)}">Connect</a>`}
+          </div>
+        `;
+      }).join("")
+    : `<p class="link-receiver-empty">${isDisc ? "Scanning your network…" : "No senders found."}</p>`;
+
+  const errorHtml = s.lastError && !isConn
+    ? `<div class="link-msg link-msg-error link-receiver-error">${escapeHtml(s.lastError)}</div>`
+    : "";
+
+  linkContentElement.innerHTML = `
+    <div class="link-receiver-panel">
+      <div class="link-receiver-topbar">
+        <h1 class="link-receiver-heading">Marucast Receiver</h1>
+        <button type="button" class="link-btn link-btn-subtle link-receiver-scan-btn" id="receiver-discover-btn">
+          ${isDisc ? "Stop" : isConn ? "Rescan" : "Scan"}
+        </button>
+      </div>
+      <div class="link-receiver-status">
+        <span class="link-receiver-status-dot ${statusDotClass}"></span>
+        <span class="link-receiver-status-text">${statusText}</span>
+      </div>
+      ${errorHtml}
+      ${controlsHtml}
+      <div class="link-receiver-list">${senderListHtml}</div>
+    </div>
+  `;
+      }).join("")
+    : `<p class="link-receiver-empty">${isDisc ? "Scanning for Marucast senders on your network…" : "No senders found. Make sure a phone is broadcasting Marucast on the same Wi-Fi."}</p>`;
+
+  const controlsHtml = isConn
+    ? `
+      <div class="link-receiver-controls">
+        <div class="link-receiver-info">
+          <span class="link-receiver-sender">Now playing from: <strong>${escapeHtml(s.senderName)}</strong></span>
+        </div>
+        <div class="link-receiver-volume">
+          <span>Volume</span>
+          <input type="range" class="link-receiver-volume-slider" id="receiver-volume" min="0" max="1" step="0.05" value="${s.volume}">
+          <span class="link-receiver-volume-value">${Math.round(s.volume * 100)}%</span>
+        </div>
+        <button type="button" class="link-btn link-btn-stop" id="receiver-disconnect-btn">Disconnect</button>
+      </div>
+    `
+    : "";
+
+  const errorHtml = s.lastError ? `<div class="link-msg link-msg-error">${escapeHtml(s.lastError)}</div>` : "";
+
+  linkContentElement.innerHTML = `
+    <div class="link-panel">
+      <h1 class="link-panel-title">Marucast Receiver</h1>
+      <p class="link-panel-sub">Receive audio broadcasts from phones on your network and play them through this TV.</p>
+
+      ${errorHtml}
+      ${controlsHtml}
+
+      <div class="link-receiver-header">
+        <h2 class="link-receiver-heading">Available Senders</h2>
+        <button type="button" class="link-btn link-btn-subtle" id="receiver-discover-btn">
+          ${isDisc ? "Scanning…" : isConn ? "Scan for more" : "Scan"}
+        </button>
+      </div>
+
+      <div class="link-catalog-grid">${senderListHtml}</div>
+    </div>
+  `;
+
+  document.querySelectorAll<HTMLElement>("[data-receiver-connect-host]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const host = link.getAttribute("data-receiver-connect-host") ?? "";
+      const port = parseInt(link.getAttribute("data-receiver-connect-port") ?? "0", 10);
+      const name = link.getAttribute("data-receiver-connect-name") ?? "";
+      if (host && port > 0 && name) connectToSender(host, port, name);
+    });
+  });
+
+  document.getElementById("receiver-disconnect-btn")?.addEventListener("click", () => {
+    disconnectReceiver();
+  });
+
+  document.getElementById("receiver-discover-btn")?.addEventListener("click", () => {
+    if (isDisc) stopReceiverDiscovery();
+    else startReceiverDiscovery();
+  });
+
+  const volumeSlider = document.getElementById("receiver-volume") as HTMLInputElement | null;
+  volumeSlider?.addEventListener("input", () => {
+    const vol = parseFloat(volumeSlider.value);
+    window.HelperNativeBridge?.setMarucastReceiverVolume?.(vol);
+    const valueEl = volumeSlider.nextElementSibling;
+    if (valueEl) valueEl.textContent = `${Math.round(vol * 100)}%`;
+  });
+}
+
 /* ---------- nav ---------- */
 
 function updateNavButtons() {
@@ -634,15 +1017,20 @@ function updateNavButtons() {
   });
 }
 
-function switchPanel(panel: "catalog" | "marucast" | "settings") {
+function switchPanel(panel: "catalog" | "marucast" | "settings" | "receiver") {
   activePanel = panel;
   stopMarucastStatusPolling();
+  stopReceiverPolling();
   if (panel === "catalog") renderCatalogPanel();
   else if (panel === "marucast") {
     const openUrl = buildLinkSiteUrl(persistServerOrigin(null), "/marucast");
     activateMarucastPanel({ openUrl, receiverToken: marucastPanelContext?.receiverToken ?? null, serverOrigin: marucastPanelContext?.serverOrigin ?? persistServerOrigin(null) });
     marucastPanelError = ""; marucastPanelMessage = "Control this phone's Marucast broadcast here.";
     renderMarucastPanel();
+  }
+  else if (panel === "receiver") {
+    renderReceiverPanel();
+    startReceiverPolling();
   }
   else if (panel === "settings") renderSettingsPanel();
   updateNavButtons();
@@ -768,10 +1156,20 @@ async function initializeLink() {
   getLinkInstallationId();
   persistServerOrigin(null);
 
+  /* TV remote handling */
+  initTvRemoteHandling();
+
+  /* Show receiver nav only on TV */
+  detectDeviceFormFactor();
+  const receiverBtn = document.getElementById("nav-receiver-btn");
+  if (receiverBtn) {
+    receiverBtn.style.display = (deviceFormFactor === "tv" || deviceFormFactor === "tv-remote") ? "" : "none";
+  }
+
   /* Nav click handlers */
   document.querySelectorAll<HTMLElement>(".link-nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const panel = btn.dataset.panel as "catalog" | "marucast" | "settings";
+      const panel = btn.dataset.panel as "catalog" | "marucast" | "settings" | "receiver";
       if (panel) switchPanel(panel);
     });
   });

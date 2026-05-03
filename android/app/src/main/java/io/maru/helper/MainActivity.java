@@ -1,13 +1,19 @@
 package io.maru.helper;
 
+import android.app.DownloadManager;
+import android.app.UiModeManager;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.Manifest;
 import android.provider.Settings;
+import android.view.InputDevice;
+import android.view.KeyEvent;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
@@ -24,6 +30,8 @@ public class MainActivity extends BridgeActivity {
     private static final String LAUNCHER_ALIAS_NAME = "io.maru.helper.LauncherAlias";
     private static final String AUDIO_PERMISSION_ACTION_MICROPHONE = "microphone";
     private static final String AUDIO_PERMISSION_ACTION_PLAYBACK_CAPTURE = "playback-capture";
+    private boolean isTvDevice = false;
+    private boolean hasRemoteInput = false;
     private ActivityResultLauncher<String[]> marucastAudioPicker;
     private ActivityResultLauncher<String> marucastRecordAudioPermissionRequest;
     private ActivityResultLauncher<Intent> marucastPlaybackCaptureLauncher;
@@ -32,6 +40,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        detectTvDevice();
 
         MarucastSenderManager.getInstance().bind(getApplicationContext());
         HelperMediaSessionMonitor.getInstance().bind(getApplicationContext());
@@ -159,6 +169,46 @@ public class MainActivity extends BridgeActivity {
         ComponentName launcherAlias = new ComponentName(this, LAUNCHER_ALIAS_NAME);
         int state = packageManager.getComponentEnabledSetting(launcherAlias);
         return state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+    }
+
+    private void detectTvDevice() {
+        UiModeManager uiModeManager = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+        if (uiModeManager != null) {
+            isTvDevice = uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
+        }
+        if (!isTvDevice) {
+            PackageManager pm = getPackageManager();
+            isTvDevice = pm.hasSystemFeature("android.software.leanback");
+        }
+        if (!isTvDevice) {
+            PackageManager pm = getPackageManager();
+            isTvDevice = pm.hasSystemFeature("android.hardware.type.television");
+        }
+    }
+
+    private boolean isRemoteInputDevice(InputDevice device) {
+        if (device == null) return false;
+        int sources = device.getSources();
+        boolean hasDpad = (sources & InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD;
+        boolean hasGamepad = (sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD;
+        boolean hasKeyboard = (sources & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD;
+        return hasDpad || hasGamepad || hasKeyboard;
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        InputDevice device = event.getDevice();
+        if (isRemoteInputDevice(device)) {
+            hasRemoteInput = true;
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                getBridge().getWebView().post(() -> {
+                    if (getBridge() != null) {
+                        getBridge().getWebView().evaluateJavascript("window.__tvRemoteKeyPressed && window.__tvRemoteKeyPressed(" + keyCode + ")", null);
+                    }
+                });
+            }
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     private void launchMarucastPlaybackCapturePrompt() {
@@ -362,6 +412,94 @@ public class MainActivity extends BridgeActivity {
                     // fallback UI stay visible instead.
                 }
             });
+        }
+
+        @JavascriptInterface
+        public void downloadApk(String rawUrl, String rawFilename) {
+            if (rawUrl == null || rawUrl.trim().isEmpty()) {
+                return;
+            }
+
+            String filename = rawFilename == null || rawFilename.trim().isEmpty()
+                ? "maru-app.apk"
+                : rawFilename.trim();
+
+            Uri parsedUrl = Uri.parse(rawUrl.trim());
+            DownloadManager downloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            if (downloadManager == null) return;
+
+            DownloadManager.Request request = new DownloadManager.Request(parsedUrl);
+            request.setTitle("Maru APK Download");
+            request.setDescription("Downloading " + filename);
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(
+                android.os.Environment.DIRECTORY_DOWNLOADS,
+                filename
+            );
+            request.setMimeType("application/vnd.android.package-archive");
+            request.setVisibleInDownloadsUi(true);
+
+            downloadManager.enqueue(request);
+        }
+
+        @JavascriptInterface
+        public boolean canInstallUnknownApps() {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
+                return true;
+            }
+            return getPackageManager().canRequestPackageInstalls();
+        }
+
+        @JavascriptInterface
+        public String getDeviceFormFactor() {
+            if (isTvDevice) return "tv";
+            if (hasRemoteInput) return "tv-remote";
+            return "mobile";
+        }
+
+        @JavascriptInterface
+        public boolean canInstallApks() {
+            return !isTvDevice;
+        }
+
+        @JavascriptInterface
+        public String getMarucastReceiverStatus() {
+            return MarucastReceiverManager.getInstance().getStatusJson();
+        }
+
+        @JavascriptInterface
+        public String startMarucastReceiverDiscovery() {
+            MarucastReceiverManager.getInstance().startDiscovery();
+            return MarucastReceiverManager.getInstance().getStatusJson();
+        }
+
+        @JavascriptInterface
+        public String stopMarucastReceiverDiscovery() {
+            MarucastReceiverManager.getInstance().stopDiscovery();
+            return MarucastReceiverManager.getInstance().getStatusJson();
+        }
+
+        @JavascriptInterface
+        public String getMarucastDiscoveredSenders() {
+            return MarucastReceiverManager.getInstance().getDiscoveredSendersJson();
+        }
+
+        @JavascriptInterface
+        public String connectMarucastReceiver(String host, int port, String senderName) {
+            MarucastReceiverManager.getInstance().connectToSender(host, port, senderName);
+            return MarucastReceiverManager.getInstance().getStatusJson();
+        }
+
+        @JavascriptInterface
+        public String disconnectMarucastReceiver() {
+            MarucastReceiverManager.getInstance().disconnect();
+            return MarucastReceiverManager.getInstance().getStatusJson();
+        }
+
+        @JavascriptInterface
+        public String setMarucastReceiverVolume(float volume) {
+            MarucastReceiverManager.getInstance().setVolume(volume);
+            return MarucastReceiverManager.getInstance().getStatusJson();
         }
     }
 }
