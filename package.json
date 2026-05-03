@@ -3,6 +3,7 @@
   "version": "1.5.42",
   "description": "Maru Link Service - Android helper app",
   "author": "Maru",
+  "license": "GPL-3.0",
   "scripts": {
     "build:web": "vite build",
     "android:sync": "npm run build:web && npx cap sync android",
