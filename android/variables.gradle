@@ -1,7 +1,19 @@
+/*
+ * Maru Mobile Build Variables
+ * 
+ * This file defines the Android SDK versions and library versions used across all modules.
+ * Forking? Update these versions to match your target Android API level.
+ * 
+ * - minSdkVersion: Minimum Android version (API 24 = Android 7.0). Lower = more compatible but less features.
+ * - compileSdkVersion: The Android SDK version to compile against. Higher = more APIs available.
+ * - targetSdkVersion: The Android version your app targets. Should match compileSdkVersion.
+ */
+
+// SDK versions - change these to target different Android API levels
 ext {
-    minSdkVersion = 24
-    compileSdkVersion = 36
-    targetSdkVersion = 36
+    minSdkVersion = 24            // Android 7.0 Nougat (2016) - minimum supported version
+    compileSdkVersion = 36         // Android 16 - latest SDK for building
+    targetSdkVersion = 36          // Target API level (match compileSdkVersion for best compatibility)
     androidxActivityVersion = '1.11.0'
     androidxAppCompatVersion = '1.7.1'
     androidxCoordinatorLayoutVersion = '1.3.0'
