@@ -18,6 +18,10 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
@@ -38,6 +42,10 @@ public class MainActivity extends BridgeActivity {
     private ActivityResultLauncher<String> marucastRecordAudioPermissionRequest;
     private ActivityResultLauncher<Intent> marucastPlaybackCaptureLauncher;
     private String pendingMarucastAudioPermissionAction = null;
+    private final Object stemInstallLock = new Object();
+    private volatile boolean stemModelInstalling = false;
+    private volatile String stemModelLastMessage = "";
+    private volatile String stemModelLastError = "";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -234,6 +242,151 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private JSONObject buildStemModelStatusJson() {
+        JSONObject payload = new JSONObject();
+        File downloadedModel = HelperStemVocalReducer.getDownloadedModelFile(this);
+        File legacyModel = HelperStemVocalReducer.getLegacyDownloadedModelFile(this);
+        boolean installed = downloadedModel.exists() || legacyModel.exists();
+        File activeFile = downloadedModel.exists() ? downloadedModel : legacyModel;
+
+        try {
+            payload.put("installed", installed);
+            payload.put("installing", stemModelInstalling);
+            payload.put("sizeBytes", installed ? activeFile.length() : 0L);
+            payload.put("path", installed ? activeFile.getAbsolutePath() : JSONObject.NULL);
+            payload.put("ready", MarucastSenderManager.getInstance().getStatusJson());
+            payload.put("lastMessage", stemModelLastMessage == null || stemModelLastMessage.isEmpty() ? JSONObject.NULL : stemModelLastMessage);
+            payload.put("lastError", stemModelLastError == null || stemModelLastError.isEmpty() ? JSONObject.NULL : stemModelLastError);
+        } catch (Exception ignored) {
+            // Best effort JSON payload.
+        }
+
+        return payload;
+    }
+
+    private void installStemModelInBackground(String rawUrl) {
+        synchronized (stemInstallLock) {
+            if (stemModelInstalling) {
+                stemModelLastMessage = "";
+                stemModelLastError = "Karaoke Stem is already installing.";
+                return;
+            }
+            stemModelInstalling = true;
+            stemModelLastMessage = "Installing Karaoke Stem…";
+            stemModelLastError = "";
+        }
+
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            InputStream inputStream = null;
+            FileOutputStream outputStream = null;
+            File tempFile = null;
+
+            try {
+                URL url = new URL(rawUrl.trim());
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(60000);
+                connection.setRequestProperty("Accept", "application/octet-stream");
+                connection.connect();
+
+                int statusCode = connection.getResponseCode();
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new IllegalStateException("Stem download failed (" + statusCode + ").");
+                }
+
+                inputStream = connection.getInputStream();
+                File targetFile = HelperStemVocalReducer.getDownloadedModelFile(MainActivity.this);
+                File parentDir = targetFile.getParentFile();
+                if (parentDir != null && !parentDir.exists()) {
+                    parentDir.mkdirs();
+                }
+                tempFile = new File(targetFile.getAbsolutePath() + ".tmp");
+                outputStream = new FileOutputStream(tempFile, false);
+
+                byte[] buffer = new byte[32 * 1024];
+                int read;
+                while ((read = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, read);
+                }
+                outputStream.flush();
+
+                File legacyFile = HelperStemVocalReducer.getLegacyDownloadedModelFile(MainActivity.this);
+                if (legacyFile.exists()) {
+                    legacyFile.delete();
+                }
+
+                if (targetFile.exists() && !targetFile.delete()) {
+                    throw new IllegalStateException("Could not replace the old stem file.");
+                }
+                if (!tempFile.renameTo(targetFile)) {
+                    throw new IllegalStateException("Could not finish saving the stem file.");
+                }
+
+                MarucastSenderManager.getInstance().refreshStemModel();
+                stemModelLastMessage = "Karaoke Stem installed. Marucast will use it now.";
+                stemModelLastError = "";
+            } catch (Exception error) {
+                stemModelLastMessage = "";
+                String message = error.getMessage();
+                stemModelLastError =
+                    message == null || message.trim().isEmpty()
+                        ? "Could not install Karaoke Stem right now."
+                        : message.trim();
+                if (tempFile != null && tempFile.exists()) {
+                    tempFile.delete();
+                }
+            } finally {
+                try {
+                    if (outputStream != null) {
+                        outputStream.close();
+                    }
+                } catch (Exception ignored) {}
+                try {
+                    if (inputStream != null) {
+                        inputStream.close();
+                    }
+                } catch (Exception ignored) {}
+                if (connection != null) {
+                    connection.disconnect();
+                }
+                synchronized (stemInstallLock) {
+                    stemModelInstalling = false;
+                }
+            }
+        }, "MaruStemInstaller").start();
+    }
+
+    private void uninstallStemModel() {
+        synchronized (stemInstallLock) {
+            if (stemModelInstalling) {
+                stemModelLastMessage = "";
+                stemModelLastError = "Wait for Karaoke Stem to finish installing first.";
+                return;
+            }
+        }
+
+        boolean removed = false;
+        File currentFile = HelperStemVocalReducer.getDownloadedModelFile(this);
+        if (currentFile.exists()) {
+            removed = currentFile.delete() || removed;
+        }
+        File legacyFile = HelperStemVocalReducer.getLegacyDownloadedModelFile(this);
+        if (legacyFile.exists()) {
+            removed = legacyFile.delete() || removed;
+        }
+
+        if (removed) {
+            MarucastSenderManager.getInstance().refreshStemModel();
+            stemModelLastMessage = "Karaoke Stem removed. Space freed.";
+            stemModelLastError = "";
+            return;
+        }
+
+        stemModelLastMessage = "";
+        stemModelLastError = "There was no installed Karaoke Stem to remove.";
+    }
+
     private final class HelperNativeBridge {
         @JavascriptInterface
         public String getLauncherIconState() {
@@ -248,6 +401,21 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void persistServerOrigin(String rawServerOrigin) {
             HelperStorage.persistServerOrigin(MainActivity.this, rawServerOrigin);
+        }
+
+        @JavascriptInterface
+        public String getSharedAuthUser() {
+            return HelperStorage.getSharedAuthUser(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void setSharedAuthUser(String rawAuthUser) {
+            HelperStorage.persistSharedAuthUser(MainActivity.this, rawAuthUser);
+        }
+
+        @JavascriptInterface
+        public void clearSharedAuthUser() {
+            HelperStorage.persistSharedAuthUser(MainActivity.this, "");
         }
 
         @JavascriptInterface
@@ -417,6 +585,56 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public boolean openInstalledApp(String packageName) {
+            if (packageName == null || packageName.trim().isEmpty()) {
+                return false;
+            }
+
+            Intent launchIntent =
+                getPackageManager().getLaunchIntentForPackage(packageName.trim());
+            if (launchIntent == null) {
+                return false;
+            }
+
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            runOnUiThread(() -> {
+                try {
+                    startActivity(launchIntent);
+                } catch (Exception ignored) {
+                    // Keep the current helper visible if the package launch fails.
+                }
+            });
+            return true;
+        }
+
+        @JavascriptInterface
+        public void openLinkSettings(String panel) {
+            String safePanel = panel == null ? "" : panel.trim();
+            String serverOrigin = HelperStorage.getStoredServerOrigin(MainActivity.this);
+            Uri.Builder builder = new Uri.Builder()
+                .scheme("maruhelper")
+                .authority("helper")
+                .appendQueryParameter("action", "open-settings")
+                .appendQueryParameter("panel", safePanel.isEmpty() ? "settings" : safePanel);
+
+            if (serverOrigin != null && !serverOrigin.isEmpty()) {
+                builder.appendQueryParameter("siteOrigin", serverOrigin);
+            }
+
+            Intent launchIntent = new Intent(Intent.ACTION_VIEW, builder.build());
+            launchIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            runOnUiThread(() -> {
+                try {
+                    startActivity(launchIntent);
+                } catch (Exception ignored) {
+                    // Ignore deep-link failures and keep the current app visible.
+                }
+            });
+        }
+
+        @JavascriptInterface
         public void downloadApk(String rawUrl, String rawFilename) {
             if (rawUrl == null || rawUrl.trim().isEmpty()) {
                 return;
@@ -449,26 +667,17 @@ public class MainActivity extends BridgeActivity {
             if (rawUrl == null || rawUrl.trim().isEmpty()) {
                 return;
             }
+            installStemModelInBackground(rawUrl);
+        }
 
-            Uri parsedUrl = Uri.parse(rawUrl.trim());
-            DownloadManager downloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            if (downloadManager == null) return;
+        @JavascriptInterface
+        public String getStemModelState() {
+            return buildStemModelStatusJson().toString();
+        }
 
-            // Save to internal files dir, not Downloads
-            File modelsDir = new File(getFilesDir(), "models");
-            if (!modelsDir.exists()) {
-                modelsDir.mkdirs();
-            }
-            File outputFile = new File(modelsDir, "2stems.tflite");
-
-            DownloadManager.Request request = new DownloadManager.Request(parsedUrl);
-            request.setTitle("Maru Stem Model");
-            request.setDescription("Downloading karaoke stem model");
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setDestinationUri(Uri.fromFile(outputFile));
-            request.setMimeType("application/octet-stream");
-
-            downloadManager.enqueue(request);
+        @JavascriptInterface
+        public void removeStemModel() {
+            uninstallStemModel();
         }
 
         @JavascriptInterface

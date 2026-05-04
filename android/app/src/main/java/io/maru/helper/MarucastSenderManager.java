@@ -321,6 +321,38 @@ public final class MarucastSenderManager {
         }
     }
 
+    public void refreshStemModel() {
+        synchronized (lock) {
+            if (stemVocalReducer != null) {
+                stemVocalReducer.shutdown();
+                stemVocalReducer = null;
+            }
+
+            if (!VOCAL_MODE_REMOVE.equals(vocalMode)) {
+                markVocalProcessingStateChangedLocked();
+                return;
+            }
+
+            prepareStemReducerLocked();
+            if (stemVocalReducer == null || !stemVocalReducer.isModelReady()) {
+                vocalMode = VOCAL_MODE_NORMAL;
+                markVocalProcessingStateChangedLocked();
+                String reducerError =
+                    stemVocalReducer == null
+                        ? null
+                        : stemVocalReducer.getLastPrepareErrorMessage();
+                lastError =
+                    reducerError == null || reducerError.trim().isEmpty()
+                        ? "Karaoke went back to the normal mix because the local stem model is unavailable."
+                        : reducerError;
+                return;
+            }
+
+            lastError = null;
+            markVocalProcessingStateChangedLocked();
+        }
+    }
+
     public String getActiveRelayUrl() {
         synchronized (lock) {
             return getActiveRelayUrlLocked();

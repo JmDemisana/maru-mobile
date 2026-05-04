@@ -48,6 +48,11 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
+        <provider
+            android:name=".HelperSharedStateProvider"
+            android:authorities="io.maru.helper.sharedstate"
+            android:exported="true" />
+
         <receiver
             android:name=".HelperLastFmDetectorAlarmReceiver"
             android:enabled="true"

@@ -5,10 +5,11 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 
 public final class HelperStorage {
-    private static final String DEFAULT_SITE_ORIGIN = "https://maruchansquigle.vercel.app";
+    private static final String DEFAULT_SITE_ORIGIN = "https://maru-website.onrender.com";
     private static final String KEY_INSTALLATION_ID = "helper-installation-id";
     private static final String KEY_LAST_RENDER_NUDGE_CHECK_AT =
         "helper-last-render-nudge-check-at";
+    private static final String KEY_SHARED_AUTH_USER = "helper-shared-auth-user";
     private static final String KEY_SERVER_ORIGIN = "helper-server-origin";
     private static final String PREFS_NAME = "maru-helper-native";
 
@@ -49,6 +50,21 @@ public final class HelperStorage {
         }
 
         getPrefs(context).edit().putString(KEY_SERVER_ORIGIN, serverOrigin).apply();
+    }
+
+    public static String getSharedAuthUser(Context context) {
+        String stored = getPrefs(context).getString(KEY_SHARED_AUTH_USER, "");
+        return stored == null ? "" : stored.trim();
+    }
+
+    public static void persistSharedAuthUser(Context context, String rawAuthUser) {
+        String authUser = rawAuthUser == null ? "" : rawAuthUser.trim();
+        if (authUser.isEmpty()) {
+            getPrefs(context).edit().remove(KEY_SHARED_AUTH_USER).apply();
+            return;
+        }
+
+        getPrefs(context).edit().putString(KEY_SHARED_AUTH_USER, authUser).apply();
     }
 
     public static long getLastRenderNudgeCheckAt(Context context) {

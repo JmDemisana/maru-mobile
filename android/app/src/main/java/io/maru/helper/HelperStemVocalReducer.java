@@ -88,6 +88,19 @@ final class HelperStemVocalReducer {
         appContext = context.getApplicationContext();
     }
 
+    static File getDownloadedModelFile(Context context) {
+        return new File(context.getFilesDir(), "2stems.tflite");
+    }
+
+    static File getLegacyDownloadedModelFile(Context context) {
+        return new File(new File(context.getFilesDir(), "models"), "2stems.tflite");
+    }
+
+    static boolean hasDownloadedModel(Context context) {
+        return getDownloadedModelFile(context).exists() ||
+            getLegacyDownloadedModelFile(context).exists();
+    }
+
     boolean prepare() {
         synchronized (lock) {
             if (modelReady && running && workerThread != null && workerThread.isAlive()) {
@@ -507,7 +520,7 @@ final class HelperStemVocalReducer {
 
     private ByteBuffer loadModelFile() throws IOException {
         // First try loading from internal storage (downloaded by user)
-        final File stemModelFile = new File(appContext.getFilesDir(), "2stems.tflite");
+        final File stemModelFile = getDownloadedModelFile(appContext);
         if (stemModelFile.exists()) {
             try (FileInputStream inputStream = new FileInputStream(stemModelFile);
                  FileChannel fileChannel = inputStream.getChannel()) {
@@ -515,6 +528,18 @@ final class HelperStemVocalReducer {
                     FileChannel.MapMode.READ_ONLY,
                     0,
                     stemModelFile.length()
+                );
+            }
+        }
+
+        final File legacyStemModelFile = getLegacyDownloadedModelFile(appContext);
+        if (legacyStemModelFile.exists()) {
+            try (FileInputStream inputStream = new FileInputStream(legacyStemModelFile);
+                 FileChannel fileChannel = inputStream.getChannel()) {
+                return fileChannel.map(
+                    FileChannel.MapMode.READ_ONLY,
+                    0,
+                    legacyStemModelFile.length()
                 );
             }
         }

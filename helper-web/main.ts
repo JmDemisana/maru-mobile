@@ -15,17 +15,21 @@ import "./style.css";
 
 const LINK_INSTALLATION_ID_KEY = "link-app-installation-id-v1";
 const LINK_SERVER_ORIGIN_KEY = "link-app-server-origin-v1";
-const DEFAULT_SITE_ORIGIN = "https://maruchansquigle.vercel.app";
+const LINK_SHARED_AUTH_USER_KEY = "link-shared-auth-user-v1";
+const LINK_ELEVATION_TOKEN_KEY = "link-elevation-token-v1";
+const DEFAULT_SITE_ORIGIN = "https://maru-website.onrender.com";
 const NATIVE_NOTIFICATION_SETTINGS_URL = "helper-native://notification-listener-settings";
 const MARUCAST_IDLE_AUTO_STOP_MS = 2 * 60 * 1000;
 const MARUCAST_STATUS_POLL_MS = 320;
-const GITHUB_RELEASES_API = "https://api.github.com/repos/JmDemisana/maru-mobile/releases/latest";
+const GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/JmDemisana/maru-mobile/releases/latest";
+const GITHUB_RELEASES_LIST_API = "https://api.github.com/repos/JmDemisana/maru-mobile/releases";
 
 const APPLET_REGISTRY = [
   { id: "photoserve", name: "PhotoServe", desc: "Desktop print workstation for 4R photo layouts and export.", apk: "maru-photoserve.apk", icon: "icons/applet-photo-serve.svg" },
   { id: "cupcuppercuppers", name: "Cup-Cupper-Cuppers", desc: "Case-picking shell game — pick the cup that wins.", apk: "maru-cupcuppercuppers.apk", icon: "icons/applet-cup-cupper-cuppers.svg" },
   { id: "daelornodael", name: "Dael or No Dael", desc: "Deal or No Deal clone with banker offers and swaps.", apk: "maru-daelornodael.apk", icon: "icons/applet-dael.svg" },
   { id: "tupgradesolver", name: "TUP Grade Solver", desc: "Score-target calculator for TUP grading.", apk: "maru-tupgradesolver.apk", icon: "icons/applet-tup-grade.svg" },
+  { id: "schededit", name: "SchedEdit", desc: "Weekly class planner with shared account sync and reminders.", apk: "maru-schededit.apk", icon: "icons/applet-schededit.svg" },
 ];
 
 /* ---------- types ---------- */
@@ -88,6 +92,29 @@ type GitHubRelease = {
   assets: GitHubAsset[];
 };
 
+type AuthUser = {
+  userId: string;
+  email: string;
+  fullName: string;
+};
+
+type StemModelState = {
+  installed?: boolean;
+  installing?: boolean;
+  lastError?: string | null;
+  lastMessage?: string | null;
+  path?: string | null;
+  sizeBytes?: number;
+};
+
+type CompanionDeviceSummary = {
+  installationId: string;
+  appVersion?: string | null;
+  lastFmNotificationsEnabled?: boolean;
+  lastLastFmSentAt?: string | null;
+  updatedAt?: string | null;
+};
+
 declare global {
   interface Window {
     HelperNativeBridge?: {
@@ -100,9 +127,14 @@ declare global {
       getMarucastStatus?: () => string;
       openNotificationListenerSettings?: () => void;
       openExternalUrl?: (url: string) => void;
+      openInstalledApp?: (packageName: string) => boolean;
+      openLinkSettings?: (panel: string) => void;
       pickMarucastAudioFile?: () => void;
       persistInstallationId?: (installationId: string) => void;
       persistServerOrigin?: (serverOrigin: string) => void;
+      getSharedAuthUser?: () => string;
+      setSharedAuthUser?: (rawAuthUser: string) => void;
+      clearSharedAuthUser?: () => void;
       startMarucastClockSync?: () => string;
       startMarucastPlaybackRelay?: () => void;
       startMarucastSender?: () => string;
@@ -112,6 +144,8 @@ declare global {
       installApkFromUrl?: (url: string, filename: string) => string;
       downloadApk?: (url: string, filename: string) => void;
       downloadStemModel?: (url: string) => void;
+      getStemModelState?: () => string;
+      removeStemModel?: () => void;
       getDeviceFormFactor?: () => string;
       canInstallApks?: () => boolean;
       canInstallUnknownApps?: () => boolean;
@@ -146,6 +180,31 @@ let marucastLinkedReceiverSurfaceRequestKey: string | null = null;
 let cachedRelease: GitHubRelease | null = null;
 let cachedReleaseAt = 0;
 let cachedApkUrls: Record<string, { url: string; size: string }> = {};
+let sharedAuthUser: AuthUser | null = null;
+let backendHealthState: {
+  checkedAt: number;
+  label: string;
+  tone: "idle" | "ok" | "warn";
+} = {
+  checkedAt: 0,
+  label: "Checking quietly…",
+  tone: "idle",
+};
+let accountSyncExpanded = false;
+let accountSyncBusy = false;
+let accountSyncMode: "signin" | "verify" | "complete" = "signin";
+let accountSyncEmail = "";
+let accountSyncOtp = "";
+let accountSyncName = "";
+let accountSyncSignupToken = "";
+let accountSyncMessage = "";
+let accountSyncError = "";
+let elevationExpanded = false;
+let elevationBusy = false;
+let elevationPin = "";
+let elevationMessage = "";
+let elevationError = "";
+let elevationDevices: Record<string, CompanionDeviceSummary> = {};
 
 /* ---------- receiver state ---------- */
 
@@ -175,6 +234,365 @@ function escapeHtml(value: string) {
 
 function wait(ms: number) { return new Promise<void>((r) => window.setTimeout(r, ms)); }
 
+function parseAuthUser(raw: string | null | undefined) {
+  const parsed = parseBridgeJson<AuthUser>(raw);
+  if (!parsed?.userId || !parsed.email || !parsed.fullName) {
+    return null;
+  }
+  return parsed;
+}
+
+function getStoredSharedAuthUser() {
+  return parseAuthUser(localStorage.getItem(LINK_SHARED_AUTH_USER_KEY));
+}
+
+function persistSharedAuthUser(nextUser: AuthUser | null) {
+  sharedAuthUser = nextUser;
+  if (!nextUser) {
+    localStorage.removeItem(LINK_SHARED_AUTH_USER_KEY);
+    try { window.HelperNativeBridge?.clearSharedAuthUser?.(); } catch {}
+    return;
+  }
+
+  const raw = JSON.stringify(nextUser);
+  localStorage.setItem(LINK_SHARED_AUTH_USER_KEY, raw);
+  try { window.HelperNativeBridge?.setSharedAuthUser?.(raw); } catch {}
+}
+
+function loadSharedAuthUser() {
+  const nativeUser = parseAuthUser(window.HelperNativeBridge?.getSharedAuthUser?.());
+  if (nativeUser) {
+    persistSharedAuthUser(nativeUser);
+    return nativeUser;
+  }
+  const stored = getStoredSharedAuthUser();
+  sharedAuthUser = stored;
+  return stored;
+}
+
+function getStoredElevationToken() {
+  return localStorage.getItem(LINK_ELEVATION_TOKEN_KEY)?.trim() || "";
+}
+
+function persistElevationToken(nextToken: string | null | undefined) {
+  const trimmed = nextToken?.trim() || "";
+  if (!trimmed) {
+    localStorage.removeItem(LINK_ELEVATION_TOKEN_KEY);
+    return;
+  }
+  localStorage.setItem(LINK_ELEVATION_TOKEN_KEY, trimmed);
+}
+
+function clearElevationState() {
+  persistElevationToken(null);
+  elevationDevices = {};
+}
+
+async function postSiteAuth<T>(serverOrigin: string, data: Record<string, unknown>) {
+  const response = await CapacitorHttp.post({
+    url: `${serverOrigin}/api/auth`,
+    headers: { "Content-Type": "application/json" },
+    data,
+    responseType: "json",
+  });
+  const payload =
+    response.data && typeof response.data === "object"
+      ? (response.data as T & { error?: string })
+      : ({} as T & { error?: string });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(payload.error || `Request failed (${response.status}).`);
+  }
+  return payload;
+}
+
+async function postSiteSubscription<T>(
+  serverOrigin: string,
+  data: Record<string, unknown>,
+  token?: string | null,
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const trimmedToken = token?.trim() || "";
+  if (trimmedToken) {
+    headers.Authorization = `Bearer ${trimmedToken}`;
+  }
+  const response = await CapacitorHttp.post({
+    url: `${serverOrigin}/api/subscription`,
+    headers,
+    data,
+    responseType: "json",
+  });
+  const payload =
+    response.data && typeof response.data === "object"
+      ? (response.data as T & { error?: string })
+      : ({} as T & { error?: string });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(payload.error || `Request failed (${response.status}).`);
+  }
+  return payload;
+}
+
+async function handleAccountSyncAction(
+  kind: "send-code" | "verify-code" | "complete-signup" | "sign-out",
+  serverOrigin: string,
+) {
+  if (accountSyncBusy) return;
+
+  accountSyncBusy = true;
+  accountSyncError = "";
+  accountSyncMessage = "";
+  renderSettingsPanel();
+
+  try {
+    if (kind === "sign-out") {
+      persistSharedAuthUser(null);
+      accountSyncExpanded = false;
+      accountSyncMode = "signin";
+      accountSyncOtp = "";
+      accountSyncName = "";
+      accountSyncSignupToken = "";
+      accountSyncMessage = "Shared account removed from this device.";
+      return;
+    }
+
+    if (kind === "send-code") {
+      if (!accountSyncEmail.trim()) throw new Error("Enter your email first.");
+      await postSiteAuth(serverOrigin, {
+        route: "otp/start",
+        email: accountSyncEmail.trim(),
+      });
+      accountSyncMode = "verify";
+      accountSyncMessage = "Check your email for the 6-digit code.";
+      return;
+    }
+
+    if (kind === "verify-code") {
+      if (!accountSyncEmail.trim() || !accountSyncOtp.trim()) {
+        throw new Error("Enter your email and 6-digit code.");
+      }
+      const verifyData = await postSiteAuth<{
+        email?: string;
+        fullName?: string;
+        needsName?: boolean;
+        signupToken?: string;
+        userId?: string;
+      }>(serverOrigin, {
+        route: "otp/verify",
+        email: accountSyncEmail.trim(),
+        code: accountSyncOtp.trim(),
+      });
+
+      if (verifyData.needsName) {
+        accountSyncMode = "complete";
+        accountSyncSignupToken = verifyData.signupToken ?? "";
+        accountSyncMessage = "Email confirmed. Add your full name to finish.";
+        return;
+      }
+
+      const nextUser = parseAuthUser(
+        JSON.stringify({
+          userId: verifyData.userId,
+          email: verifyData.email,
+          fullName: verifyData.fullName,
+        }),
+      );
+      if (!nextUser) throw new Error("Account details were incomplete.");
+      persistSharedAuthUser(nextUser);
+      accountSyncExpanded = false;
+      accountSyncMode = "signin";
+      accountSyncOtp = "";
+      accountSyncName = nextUser.fullName;
+      accountSyncMessage = `Signed in as ${nextUser.fullName}.`;
+      return;
+    }
+
+    if (!accountSyncEmail.trim() || !accountSyncName.trim() || !accountSyncSignupToken.trim()) {
+      throw new Error("Add your name to finish this account setup.");
+    }
+
+    const completeData = await postSiteAuth<{
+      email?: string;
+      fullName?: string;
+      userId?: string;
+    }>(serverOrigin, {
+      route: "otp/complete",
+      email: accountSyncEmail.trim(),
+      fullName: accountSyncName.trim(),
+      signupToken: accountSyncSignupToken.trim(),
+    });
+    const nextUser = parseAuthUser(
+      JSON.stringify({
+        userId: completeData.userId,
+        email: completeData.email,
+        fullName: completeData.fullName,
+      }),
+    );
+    if (!nextUser) throw new Error("Account details were incomplete.");
+    persistSharedAuthUser(nextUser);
+    accountSyncExpanded = false;
+    accountSyncMode = "signin";
+    accountSyncOtp = "";
+    accountSyncSignupToken = "";
+    accountSyncMessage = `Signed in as ${nextUser.fullName}.`;
+  } catch (error) {
+    accountSyncError =
+      error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : "Could not update the shared account right now.";
+  } finally {
+    accountSyncBusy = false;
+    renderSettingsPanel();
+  }
+}
+
+async function refreshElevationDevices(serverOrigin: string) {
+  const token = getStoredElevationToken();
+  if (!token) {
+    elevationDevices = {};
+    return elevationDevices;
+  }
+  const data = await postSiteSubscription<{ devices?: CompanionDeviceSummary[] }>(
+    serverOrigin,
+    {
+      action: "get_helper_devices",
+      helperRealm: "elevation",
+    },
+    token,
+  );
+  elevationDevices = Object.fromEntries(
+    (data.devices ?? []).map((device) => [device.installationId, device]),
+  );
+  return elevationDevices;
+}
+
+async function ensureElevationHelperLinked(serverOrigin: string) {
+  const token = getStoredElevationToken();
+  if (!token) {
+    throw new Error("Enter your PIN first.");
+  }
+
+  const existingDevice = elevationDevices[getLinkInstallationId()];
+  if (existingDevice) {
+    return existingDevice;
+  }
+
+  const reg = await registerNativePushToken();
+  if (reg.permission !== "granted" || !reg.token) {
+    throw new Error("Allow notifications first so this helper can finish linking.");
+  }
+
+  const appInfo = await CapacitorApp.getInfo().catch(() => null);
+  const appVersion =
+    typeof appInfo?.version === "string" && appInfo.version.trim()
+      ? appInfo.version.trim()
+      : currentAppVersion;
+  const startData = await postSiteSubscription<{ launchUrl?: string }>(
+    serverOrigin,
+    {
+      action: "start_helper_link",
+      helperRealm: "elevation",
+    },
+    token,
+  );
+  const launchToken = parseLinkUrl(startData.launchUrl)?.token ?? "";
+  if (!launchToken) {
+    throw new Error("Could not prepare the elevated helper lane.");
+  }
+
+  await postSiteAuth(serverOrigin, {
+    route: "companion/link-complete",
+    installationId: getLinkInstallationId(),
+    platform: "android",
+    pushToken: reg.token,
+    token: launchToken,
+    appVersion,
+  });
+  await refreshElevationDevices(serverOrigin);
+  return elevationDevices[getLinkInstallationId()] ?? null;
+}
+
+async function handleElevationAction(
+  kind: "unlock" | "sign-out" | "toggle-lastfm",
+  serverOrigin: string,
+) {
+  if (elevationBusy) return;
+
+  elevationBusy = true;
+  elevationError = "";
+  elevationMessage = "";
+  renderSettingsPanel();
+
+  try {
+    if (kind === "sign-out") {
+      clearElevationState();
+      elevationExpanded = false;
+      elevationPin = "";
+      elevationMessage = "Elevation removed from this device.";
+      return;
+    }
+
+    if (kind === "unlock") {
+      if (!elevationPin.trim()) {
+        throw new Error("Enter your PIN first.");
+      }
+      const data = await postSiteAuth<{ token?: string }>(serverOrigin, {
+        route: "login",
+        username: "bypass",
+        pin: elevationPin.trim(),
+      });
+      const nextToken = data.token?.trim() || "";
+      if (!nextToken) {
+        throw new Error("Could not unlock Elevation right now.");
+      }
+      persistElevationToken(nextToken);
+      await refreshElevationDevices(serverOrigin);
+      elevationPin = "";
+      elevationMessage = "Elevation is ready on this device.";
+      return;
+    }
+
+    const currentDevice = await ensureElevationHelperLinked(serverOrigin);
+    if (!currentDevice) {
+      throw new Error("This helper still is not linked to the elevated lane.");
+    }
+
+    const enabled = !Boolean(currentDevice.lastFmNotificationsEnabled);
+    const data = await postSiteSubscription<{ devices?: CompanionDeviceSummary[] }>(
+      serverOrigin,
+      {
+        action: "update_helper_lastfm_notifications",
+        helperRealm: "elevation",
+        installationId: getLinkInstallationId(),
+        enabled,
+      },
+      getStoredElevationToken(),
+    );
+    elevationDevices = Object.fromEntries(
+      (data.devices ?? []).map((device) => [device.installationId, device]),
+    );
+    elevationMessage = enabled
+      ? "Notify scrobbles is on for this helper."
+      : "Notify scrobbles is off for this helper.";
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : "Could not update Elevation right now.";
+    if (
+      message.toLowerCase().includes("401") ||
+      message.toLowerCase().includes("403") ||
+      message.toLowerCase().includes("session expired")
+    ) {
+      clearElevationState();
+    }
+    elevationError = message;
+  } finally {
+    elevationBusy = false;
+    renderSettingsPanel();
+  }
+}
+
 function getMarucastStatus() {
   return parseBridgeJson<HelperMarucastStatus>(window.HelperNativeBridge?.getMarucastStatus?.());
 }
@@ -189,24 +607,13 @@ function normalizeReceiverSurface(value: "desktop-web" | "tv-app" | null | undef
 
 /* ---------- release fetching ---------- */
 
-async function findApkInReleases(apkPatterns: string): Promise<{ url: string; size: string } | null {
+async function findApkInReleases(apkPatterns: string): Promise<{ url: string; size: string } | null> {
   const patterns = apkPatterns.split(",").map(p => p.trim().toLowerCase());
   
-  // Check latest release first, fall back to fetching all if needed
-  try {
-    const resp = await CapacitorHttp.get({ url: GITHUB_RELEASES_API, responseType: "json" });
-    const release = resp.data as GitHubRelease | null;
-    if (release?.assets) {
-      const asset = release.assets.find((a) => patterns.some(p => a.name.toLowerCase().includes(p)));
-      if (asset) return { url: asset.browser_download_url, size: formatBytes(asset.size) };
-    }
-  } catch { /* ignore */ }
-  
-  // Not in latest release, paginate through older releases
   let page = 1;
   while (page <= 5) {
     try {
-      const paginatedUrl = `${GITHUB_RELEASES_API}?per_page=5&page=${page}`;
+      const paginatedUrl = `${GITHUB_RELEASES_LIST_API}?per_page=10&page=${page}`;
       const resp = await CapacitorHttp.get({ url: paginatedUrl, responseType: "json" });
       const releases = (resp.data as GitHubRelease[]) || [];
       if (releases.length === 0) break;
@@ -224,7 +631,7 @@ async function fetchLatestRelease(): Promise<GitHubRelease | null> {
   const now = Date.now();
   if (cachedRelease && now - cachedReleaseAt < 5 * 60 * 1000) return cachedRelease;
   try {
-    const resp = await CapacitorHttp.get({ url: GITHUB_RELEASES_API, responseType: "json" });
+    const resp = await CapacitorHttp.get({ url: GITHUB_LATEST_RELEASE_API, responseType: "json" });
     const data = resp.data as GitHubRelease | null;
     if (data?.tag_name && Array.isArray(data.assets)) {
       cachedRelease = data;
@@ -238,6 +645,48 @@ async function fetchLatestRelease(): Promise<GitHubRelease | null> {
 function formatBytes(bytes: number): string {
   if (bytes < 1048576) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+async function refreshBackendHealth(serverOrigin: string) {
+  if (Date.now() - backendHealthState.checkedAt < 60_000) {
+    return;
+  }
+
+  backendHealthState = {
+    checkedAt: Date.now(),
+    label: "Checking quietly…",
+    tone: "idle",
+  };
+
+  try {
+    const response = await CapacitorHttp.get({
+      url: `${serverOrigin}/healthz`,
+      responseType: "text",
+    });
+    backendHealthState = {
+      checkedAt: Date.now(),
+      label:
+        response.status >= 200 && response.status < 300
+          ? "Render backend reachable."
+          : "Render is waking up or unavailable.",
+      tone:
+        response.status >= 200 && response.status < 300 ? "ok" : "warn",
+    };
+  } catch {
+    backendHealthState = {
+      checkedAt: Date.now(),
+      label: "Render is waking up or unavailable.",
+      tone: "warn",
+    };
+  }
+
+  if (activePanel === "settings") {
+    renderSettingsPanel();
+  }
+}
+
+function getStemModelState() {
+  return parseBridgeJson<StemModelState>(window.HelperNativeBridge?.getStemModelState?.()) ?? {};
 }
 
 let currentAppVersion = "0.0.2";
@@ -295,7 +744,7 @@ function detectDeviceFormFactor() {
   }
 }
 
-async async function renderCatalogPanel() {
+async function renderCatalogPanel() {
   if (!linkContentElement) return;
 
   detectDeviceFormFactor();
@@ -382,7 +831,6 @@ async async function renderCatalogPanel() {
       <p class="link-panel-sub">${canInstall ? "Download and manage your Maru apps. Each app needs Maru Link installed to run." : "Browse available apps. Downloads are restricted on this TV device."}</p>
       ${tvNoticeHtml}
       <div class="link-catalog-grid">${cardsHtml}</div>
-
       ${communitySectionHtml}
     </div>
   `;
@@ -487,6 +935,32 @@ function startLinkUpdateDownload() {
 function renderSettingsPanel() {
   if (!linkContentElement) return;
 
+  const siteOrigin = persistServerOrigin(null) ?? DEFAULT_SITE_ORIGIN;
+  const activeSharedUser = loadSharedAuthUser();
+  const stemModelState = getStemModelState();
+  const stemInstalled = stemModelState.installed === true;
+  const stemInstalling = stemModelState.installing === true;
+  const elevationToken = getStoredElevationToken();
+  const elevatedCurrentDevice = elevationDevices[getLinkInstallationId()] ?? null;
+  const elevationLinked = Boolean(elevatedCurrentDevice);
+  const notifyScrobblesEnabled = Boolean(elevatedCurrentDevice?.lastFmNotificationsEnabled);
+  const backendHealthHtml = `<span class="link-settings-value"${
+    backendHealthState.tone === "ok"
+      ? ' style="color:rgba(122,255,160,0.9)"'
+      : backendHealthState.tone === "warn"
+      ? ' style="color:rgba(255,191,92,0.9)"'
+      : ' style="opacity:0.5"'
+  }>${escapeHtml(backendHealthState.label)}</span>`;
+  const stemStatusHtml = stemInstalling
+    ? `<span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Installing…</span>`
+    : stemInstalled
+    ? `<span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Installed${typeof stemModelState.sizeBytes === "number" && stemModelState.sizeBytes > 0 ? ` · ${formatBytes(stemModelState.sizeBytes)}` : ""}</span>`
+    : `<span class="link-settings-value" style="opacity:0.45">Not installed</span>`;
+  const stemActionLabel = stemInstalling
+    ? "Installing…"
+    : stemInstalled
+    ? "Uninstall"
+    : "Install";
   const updateStatusHtml = updateState.checking
     ? `<span class="link-settings-value" style="opacity:0.5">Checking…</span>`
     : updateState.downloading
@@ -494,10 +968,75 @@ function renderSettingsPanel() {
     : updateState.available
     ? `<span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Update available: ${escapeHtml(updateState.latestVersion)}</span>`
     : `<span class="link-settings-value" style="opacity:0.45">Up to date</span>`;
-
   const updateButtonHtml = updateState.available && !updateState.downloading
     ? `<div class="link-settings-row"><span></span><button type="button" class="link-btn link-btn-update" id="settings-update-btn">Download Update</button></div>`
     : "";
+  const elevationStatusHtml = !elevationToken
+    ? `<span class="link-settings-value" style="color:rgba(255,191,92,0.9)">PIN needed</span>`
+    : notifyScrobblesEnabled
+      ? `<span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Notify scrobbles on</span>`
+      : elevationLinked
+        ? `<span class="link-settings-value" style="opacity:0.75">Notify scrobbles off</span>`
+        : `<span class="link-settings-value" style="opacity:0.75">Ready to link</span>`;
+  const elevationBodyHtml = elevationExpanded
+    ? elevationToken
+      ? `
+        <div class="link-settings-note">
+          ${elevationLinked ? "This helper is already in the elevated lane." : "This helper will finish linking itself the first time you turn on scrobble alerts."}
+        </div>
+        <div class="link-settings-row">
+          <span>Notify scrobbles</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-elevation-toggle-lastfm"${elevationBusy ? " disabled" : ""}>${notifyScrobblesEnabled ? "Turn Off" : "Turn On"}</button>
+        </div>
+        ${elevatedCurrentDevice?.lastLastFmSentAt ? `<div class="link-settings-note">Last Last.fm alert: ${escapeHtml(new Date(elevatedCurrentDevice.lastLastFmSentAt).toLocaleString())}</div>` : ""}
+        <div class="link-settings-actions">
+          <button type="button" class="link-btn link-btn-subtle" id="settings-elevation-signout"${elevationBusy ? " disabled" : ""}>Remove</button>
+        </div>
+      `
+      : `
+        <div class="link-settings-note">Unlock this once if you want Last.fm scrobble alerts on the same device.</div>
+        <label class="link-settings-field">
+          <span>Site Admin PIN</span>
+          <input id="settings-elevation-pin" inputmode="numeric" maxlength="6" value="${escapeHtml(elevationPin)}" placeholder="123456"${elevationBusy ? " disabled" : ""} />
+        </label>
+        <div class="link-settings-actions">
+          <button type="button" class="link-btn link-btn-subtle" id="settings-elevation-unlock"${elevationBusy ? " disabled" : ""}>Unlock</button>
+        </div>
+      `
+    : elevationToken
+      ? `<div class="link-settings-note">Elevation is ready for this helper.</div>`
+      : `<div class="link-settings-note">No elevated helper lane yet.</div>`;
+  const accountBodyHtml = accountSyncExpanded
+    ? activeSharedUser
+      ? `
+        <div class="link-settings-note">
+          Signed in as <strong>${escapeHtml(activeSharedUser.fullName)}</strong><br />
+          ${escapeHtml(activeSharedUser.email)}
+        </div>
+        <div class="link-settings-row">
+          <span>Use this shared account in SchedEdit and other Maru apps.</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-account-signout"${accountSyncBusy ? " disabled" : ""}>Remove</button>
+        </div>
+      `
+      : `
+        <div class="link-settings-note">Use one email sign-in here, then Maru apps can reuse it without separate logins.</div>
+        <label class="link-settings-field">
+          <span>Email</span>
+          <input id="settings-account-email" type="email" value="${escapeHtml(accountSyncEmail)}" placeholder="name@example.com"${accountSyncBusy ? " disabled" : ""} />
+        </label>
+        ${accountSyncMode !== "signin" ? `<label class="link-settings-field"><span>6-digit code</span><input id="settings-account-code" inputmode="numeric" maxlength="6" value="${escapeHtml(accountSyncOtp)}" placeholder="123456"${accountSyncBusy ? " disabled" : ""} /></label>` : ""}
+        ${accountSyncMode === "complete" ? `<label class="link-settings-field"><span>Full name</span><input id="settings-account-name" value="${escapeHtml(accountSyncName)}" placeholder="Your full name"${accountSyncBusy ? " disabled" : ""} /></label>` : ""}
+        <div class="link-settings-actions">
+          ${accountSyncMode === "signin"
+            ? `<button type="button" class="link-btn link-btn-subtle" id="settings-account-send"${accountSyncBusy ? " disabled" : ""}>Email me a code</button>`
+            : accountSyncMode === "verify"
+            ? `<button type="button" class="link-btn link-btn-subtle" id="settings-account-verify"${accountSyncBusy ? " disabled" : ""}>Continue</button>`
+            : `<button type="button" class="link-btn link-btn-subtle" id="settings-account-complete"${accountSyncBusy ? " disabled" : ""}>Finish sign-in</button>`}
+        </div>
+      `
+    : activeSharedUser
+    ? `<div class="link-settings-note">Signed in as ${escapeHtml(activeSharedUser.fullName)}.</div>`
+    : `<div class="link-settings-note">No shared account yet.</div>`;
 
   linkContentElement.innerHTML = `
     <div class="link-panel">
@@ -508,7 +1047,7 @@ function renderSettingsPanel() {
         <h2 class="link-settings-heading">Maru Link</h2>
         <div class="link-settings-row">
           <span>Version</span>
-          <span class="link-settings-value" id="settings-version">—</span>
+          <span class="link-settings-value" id="settings-version">--</span>
         </div>
         <div class="link-settings-row">
           <span>Updates</span>
@@ -517,38 +1056,69 @@ function renderSettingsPanel() {
         ${updateButtonHtml}
         <div class="link-settings-row">
           <span>Installation ID</span>
-          <span class="link-settings-value" id="settings-install-id">—</span>
+          <span class="link-settings-value" id="settings-install-id">--</span>
         </div>
+        <div class="link-settings-row">
+          <span>Render Health</span>
+          ${backendHealthHtml}
+        </div>
+      </section>
+
+      <section class="link-settings-group">
+        <h2 class="link-settings-heading">Shared Account</h2>
+        <div class="link-settings-row">
+          <span>${activeSharedUser ? "Account ready" : "Set up sign-in"}</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-account-toggle">${accountSyncExpanded ? "Hide" : activeSharedUser ? "Manage" : "Open"}</button>
+        </div>
+        ${accountBodyHtml}
+        ${accountSyncMessage ? `<div class="link-msg link-msg-ok">${escapeHtml(accountSyncMessage)}</div>` : ""}
+        ${accountSyncError ? `<div class="link-msg link-msg-error">${escapeHtml(accountSyncError)}</div>` : ""}
       </section>
 
       <section class="link-settings-group">
         <h2 class="link-settings-heading">Marucast</h2>
         <div class="link-settings-row">
-          <span>Karaoke model</span>
-          <button type="button" class="link-btn link-btn-subtle" id="settings-download-stem">Download</button>
+          <span>Karaoke Stem</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-download-stem"${stemInstalling ? " disabled" : ""}>${stemActionLabel}</button>
         </div>
         <div class="link-settings-row">
           <span>Karaoke status</span>
-          <span className="link-settings-value" id="settings-stem-status">Not loaded</span>
+          ${stemStatusHtml}
         </div>
-        <div className="link-settings-row">
+        ${stemModelState.lastMessage ? `<div class="link-msg link-msg-ok">${escapeHtml(stemModelState.lastMessage)}</div>` : ""}
+        ${stemModelState.lastError ? `<div class="link-msg link-msg-error">${escapeHtml(stemModelState.lastError)}</div>` : ""}
+        <div class="link-settings-row">
           <span>Notification Access</span>
-          <button type="button" className="link-btn link-btn-subtle" id="settings-open-notif">Open</button>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-open-notif">Open</button>
         </div>
       </section>
 
       <section class="link-settings-group">
-        <h2 class="link-settings-heading">Account &amp; Sync</h2>
+        <h2 class="link-settings-heading">Notification Options</h2>
         <div class="link-settings-row">
-          <span>Elevate App</span>
-          <button type="button" class="link-btn link-btn-subtle" id="settings-elevate">Open</button>
+          <span>Account helper lane</span>
+          <span class="link-settings-value" style="color:rgba(122,255,160,0.9)">Built in</span>
         </div>
-        <p class="link-settings-note">Open Elevation in your browser to authenticate this device and enable Last.fm helper alerts.</p>
+        <div class="link-settings-row">
+          <span>SchedEdit reminders</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-schededit">Open</button>
+        </div>
+        <div class="link-settings-row">
+          <span>Elevation</span>
+          <button type="button" class="link-btn link-btn-subtle" id="settings-elevation-toggle">${elevationExpanded ? "Hide" : elevationToken ? "Manage" : "Open"}</button>
+        </div>
+        <div class="link-settings-row">
+          <span>Elevation status</span>
+          ${elevationStatusHtml}
+        </div>
+        ${elevationBodyHtml}
+        ${elevationMessage ? `<div class="link-msg link-msg-ok">${escapeHtml(elevationMessage)}</div>` : ""}
+        ${elevationError ? `<div class="link-msg link-msg-error">${escapeHtml(elevationError)}</div>` : ""}
+        <p class="link-settings-note">Regular helper alerts now start from Maru Link Settings. Subscription stays separate on the website.</p>
       </section>
     </div>
   `;
 
-  /* Fetch version from Capacitor and check for updates */
   CapacitorApp.getInfo().then((info) => {
     const version = info.version || "0.0.2";
     currentAppVersion = version;
@@ -562,29 +1132,119 @@ function renderSettingsPanel() {
   });
 
   document.getElementById("settings-install-id")!.textContent = getLinkInstallationId().slice(0, 8) + "…";
+  void refreshBackendHealth(siteOrigin);
 
   document.getElementById("settings-update-btn")?.addEventListener("click", () => {
     startLinkUpdateDownload();
   });
 
+  document.getElementById("settings-account-toggle")?.addEventListener("click", () => {
+    accountSyncExpanded = !accountSyncExpanded;
+    accountSyncMessage = "";
+    accountSyncError = "";
+    if (!accountSyncExpanded && !activeSharedUser) {
+      accountSyncMode = "signin";
+      accountSyncOtp = "";
+      accountSyncName = "";
+      accountSyncSignupToken = "";
+    }
+    renderSettingsPanel();
+  });
+
+  const emailField = document.getElementById("settings-account-email") as HTMLInputElement | null;
+  emailField?.addEventListener("input", () => {
+    accountSyncEmail = emailField.value;
+  });
+
+  const codeField = document.getElementById("settings-account-code") as HTMLInputElement | null;
+  codeField?.addEventListener("input", () => {
+    accountSyncOtp = codeField.value.replace(/\D/g, "").slice(0, 6);
+    codeField.value = accountSyncOtp;
+  });
+
+  const nameField = document.getElementById("settings-account-name") as HTMLInputElement | null;
+  nameField?.addEventListener("input", () => {
+    accountSyncName = nameField.value;
+  });
+
+  document.getElementById("settings-account-send")?.addEventListener("click", () => {
+    void handleAccountSyncAction("send-code", siteOrigin);
+  });
+
+  document.getElementById("settings-account-verify")?.addEventListener("click", () => {
+    void handleAccountSyncAction("verify-code", siteOrigin);
+  });
+
+  document.getElementById("settings-account-complete")?.addEventListener("click", () => {
+    void handleAccountSyncAction("complete-signup", siteOrigin);
+  });
+
+  document.getElementById("settings-account-signout")?.addEventListener("click", () => {
+    void handleAccountSyncAction("sign-out", siteOrigin);
+  });
+
   document.getElementById("settings-download-stem")?.addEventListener("click", () => {
+    if (stemInstalled) {
+      window.HelperNativeBridge?.removeStemModel?.();
+      renderSettingsPanel();
+      return;
+    }
     const stemUrl = "https://github.com/JmDemisana/maru-mobile/releases/latest/download/2stems.tflite";
     window.HelperNativeBridge?.downloadStemModel?.(stemUrl);
+    renderSettingsPanel();
   });
 
   document.getElementById("settings-open-notif")?.addEventListener("click", () => {
     try { window.HelperNativeBridge?.openNotificationListenerSettings?.(); } catch {}
   });
 
-  document.getElementById("settings-elevate")?.addEventListener("click", () => {
-    const origin = persistServerOrigin(null) ?? DEFAULT_SITE_ORIGIN;
-    const elevationUrl = `${origin}/elevation`;
+  document.getElementById("settings-schededit")?.addEventListener("click", () => {
     try {
-      window.HelperNativeBridge?.openExternalUrl?.(elevationUrl);
+      const opened = window.HelperNativeBridge?.openInstalledApp?.("io.maru.schededit");
+      if (opened) {
+        return;
+      }
     } catch {
-      window.open(elevationUrl, "_blank");
+      // Fall through to the app catalog if the native handoff fails.
     }
+    switchPanel("catalog");
   });
+
+  document.getElementById("settings-elevation-toggle")?.addEventListener("click", () => {
+    elevationExpanded = !elevationExpanded;
+    elevationMessage = "";
+    elevationError = "";
+    if (!elevationExpanded && !elevationToken) {
+      elevationPin = "";
+    }
+    renderSettingsPanel();
+  });
+
+  const elevationPinField = document.getElementById("settings-elevation-pin") as HTMLInputElement | null;
+  elevationPinField?.addEventListener("input", () => {
+    elevationPin = elevationPinField.value.replace(/\D/g, "").slice(0, 6);
+    elevationPinField.value = elevationPin;
+  });
+
+  document.getElementById("settings-elevation-unlock")?.addEventListener("click", () => {
+    void handleElevationAction("unlock", siteOrigin);
+  });
+
+  document.getElementById("settings-elevation-signout")?.addEventListener("click", () => {
+    void handleElevationAction("sign-out", siteOrigin);
+  });
+
+  document.getElementById("settings-elevation-toggle-lastfm")?.addEventListener("click", () => {
+    void handleElevationAction("toggle-lastfm", siteOrigin);
+  });
+
+  if (stemInstalling) {
+    window.setTimeout(() => {
+      if (activePanel === "settings") {
+        renderSettingsPanel();
+      }
+    }, 900);
+  }
 }
 
 /* ---------- marucast panel ---------- */
@@ -974,45 +1634,6 @@ function renderReceiverPanel() {
       <div class="link-receiver-list">${senderListHtml}</div>
     </div>
   `;
-      }).join("")
-    : `<p class="link-receiver-empty">${isDisc ? "Scanning for Marucast senders on your network…" : "No senders found. Make sure a phone is broadcasting Marucast on the same Wi-Fi."}</p>`;
-
-  const controlsHtml = isConn
-    ? `
-      <div class="link-receiver-controls">
-        <div class="link-receiver-info">
-          <span class="link-receiver-sender">Now playing from: <strong>${escapeHtml(s.senderName)}</strong></span>
-        </div>
-        <div class="link-receiver-volume">
-          <span>Volume</span>
-          <input type="range" class="link-receiver-volume-slider" id="receiver-volume" min="0" max="1" step="0.05" value="${s.volume}">
-          <span class="link-receiver-volume-value">${Math.round(s.volume * 100)}%</span>
-        </div>
-        <button type="button" class="link-btn link-btn-stop" id="receiver-disconnect-btn">Disconnect</button>
-      </div>
-    `
-    : "";
-
-  const errorHtml = s.lastError ? `<div class="link-msg link-msg-error">${escapeHtml(s.lastError)}</div>` : "";
-
-  linkContentElement.innerHTML = `
-    <div class="link-panel">
-      <h1 class="link-panel-title">Marucast Receiver</h1>
-      <p class="link-panel-sub">Receive audio broadcasts from phones on your network and play them through this TV.</p>
-
-      ${errorHtml}
-      ${controlsHtml}
-
-      <div class="link-receiver-header">
-        <h2 class="link-receiver-heading">Available Senders</h2>
-        <button type="button" class="link-btn link-btn-subtle" id="receiver-discover-btn">
-          ${isDisc ? "Scanning…" : isConn ? "Scan for more" : "Scan"}
-        </button>
-      </div>
-
-      <div class="link-catalog-grid">${senderListHtml}</div>
-    </div>
-  `;
 
   document.querySelectorAll<HTMLElement>("[data-receiver-connect-host]").forEach((link) => {
     link.addEventListener("click", (e) => {
@@ -1065,7 +1686,13 @@ function switchPanel(panel: "catalog" | "marucast" | "settings" | "receiver") {
     renderReceiverPanel();
     startReceiverPolling();
   }
-  else if (panel === "settings") renderSettingsPanel();
+  else if (panel === "settings") {
+    renderSettingsPanel();
+    const elevationToken = getStoredElevationToken();
+    if (elevationToken && !elevationBusy) {
+      void refreshElevationDevices(persistServerOrigin(null) ?? DEFAULT_SITE_ORIGIN).catch(() => {});
+    }
+  }
   updateNavButtons();
 }
 
@@ -1108,7 +1735,13 @@ function parseLinkUrl(rawUrl: string | null | undefined) {
   try {
     const p = new URL(rawUrl);
     if (p.protocol !== `${HELPER_APP_SCHEME}:`) return null;
-    return { action: p.searchParams.get("action")?.trim() ?? "", token: p.searchParams.get("token")?.trim() ?? "", siteOrigin: p.searchParams.get("siteOrigin")?.trim() ?? "", target: p.searchParams.get("target")?.trim() ?? p.searchParams.get("url")?.trim() ?? "" };
+    return {
+      action: p.searchParams.get("action")?.trim() ?? "",
+      panel: p.searchParams.get("panel")?.trim() ?? "",
+      token: p.searchParams.get("token")?.trim() ?? "",
+      siteOrigin: p.searchParams.get("siteOrigin")?.trim() ?? "",
+      target: p.searchParams.get("target")?.trim() ?? p.searchParams.get("url")?.trim() ?? "",
+    };
   } catch { return null; }
 }
 
@@ -1139,8 +1772,19 @@ async function completeLinkFlow(rawUrl: string) {
   if (isLinking) return;
   const parsed = parseLinkUrl(rawUrl);
   const action = parsed?.action ?? "";
+  const panel = parsed?.panel ?? "";
   const token = parsed?.token ?? "";
   const serverOrigin = persistServerOrigin(parsed?.siteOrigin);
+
+  if (action === "open-settings") {
+    if (panel === "account-sync") {
+      accountSyncExpanded = true;
+      accountSyncMessage = "";
+      accountSyncError = "";
+    }
+    switchPanel("settings");
+    return;
+  }
 
   if (token && token === lastProcessedLinkToken) return;
 

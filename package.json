@@ -1,6 +1,6 @@
 {
   "name": "maru-mobile",
-  "version": "1.5.42",
+  "version": "1.5.45",
   "description": "Maru Link Service - Android helper app",
   "author": "Maru",
   "license": "GPL-3.0",
@@ -13,7 +13,9 @@
     "android:photoserve:debug": "./android/gradlew :photoserve:assembleDebug",
     "android:cupcuppercuppers:debug": "./android/gradlew :cupcuppercuppers:assembleDebug",
     "android:daelornodael:debug": "./android/gradlew :daelornodael:assembleDebug",
-    "android:tupgradesolver:debug": "./android/gradlew :tupgradesolver:assembleDebug"
+    "android:tupgradesolver:debug": "./android/gradlew :tupgradesolver:assembleDebug",
+    "android:schededit:debug": "./android/gradlew :schededit:assembleDebug",
+    "android:schededit:release": "./android/gradlew :schededit:assembleRelease"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.0",
