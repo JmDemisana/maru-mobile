@@ -11,5 +11,5 @@ export default defineConfig({
     target: "es2020",
     assetsDir: ".",
   },
-  publicDir: false,
+  publicDir: resolve(__dirname, "helper-web/public"),
 });

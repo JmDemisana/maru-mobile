@@ -20,7 +20,8 @@ body { min-height: 100dvh; }
 #link-content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ---- nav ---- */
@@ -60,7 +61,6 @@ body { min-height: 100dvh; }
   max-width: 600px;
   width: 100%;
   margin: 0 auto;
-  overflow-y: auto;
   height: 100%;
 }
 

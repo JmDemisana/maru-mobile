@@ -1,0 +1,22 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="dael-case" x1="63" y1="91" x2="189" y2="185" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF0A6"/>
+      <stop offset="1" stop-color="#C5892F"/>
+    </linearGradient>
+    <linearGradient id="dael-ring" x1="112" y1="128" x2="180" y2="196" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#ECDAB1"/>
+    </linearGradient>
+  </defs>
+  <circle cx="84" cy="80" r="48" fill="#FFC24D" fill-opacity="0.18"/>
+  <circle cx="186" cy="180" r="44" fill="#FFDA7C" fill-opacity="0.12"/>
+  <rect x="58" y="90" width="140" height="100" rx="24" fill="url(#dael-case)"/>
+  <rect x="100" y="64" width="56" height="28" rx="14" fill="#D59B37"/>
+  <rect x="111" y="74" width="34" height="8" rx="4" fill="#FFF2C7" fill-opacity="0.65"/>
+  <circle cx="128" cy="140" r="30" fill="url(#dael-ring)"/>
+  <circle cx="128" cy="140" r="18" fill="#0F1930"/>
+  <path d="M128 118V162" stroke="#FFF0BE" stroke-width="8" stroke-linecap="round"/>
+  <path d="M108 140H148" stroke="#FFF0BE" stroke-width="8" stroke-linecap="round"/>
+  <path d="M184 82L189.275 92.725L200 98L189.275 103.275L184 114L178.725 103.275L168 98L178.725 92.725L184 82Z" fill="#FFF1B9"/>
+</svg>

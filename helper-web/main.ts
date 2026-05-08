@@ -17,7 +17,7 @@ const LINK_INSTALLATION_ID_KEY = "link-app-installation-id-v1";
 const LINK_SERVER_ORIGIN_KEY = "link-app-server-origin-v1";
 const LINK_SHARED_AUTH_USER_KEY = "link-shared-auth-user-v1";
 const LINK_ELEVATION_TOKEN_KEY = "link-elevation-token-v1";
-const DEFAULT_SITE_ORIGIN = "https://maru-website.onrender.com";
+const DEFAULT_SITE_ORIGIN = "https://maruchansquigle.vercel.app";
 const NATIVE_NOTIFICATION_SETTINGS_URL = "helper-native://notification-listener-settings";
 const MARUCAST_IDLE_AUTO_STOP_MS = 2 * 60 * 1000;
 const MARUCAST_STATUS_POLL_MS = 320;
@@ -25,11 +25,11 @@ const GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/JmDemisana/maru-
 const GITHUB_RELEASES_LIST_API = "https://api.github.com/repos/JmDemisana/maru-mobile/releases";
 
 const APPLET_REGISTRY = [
-  { id: "photoserve", name: "PhotoServe", desc: "Desktop print workstation for 4R photo layouts and export.", apk: "maru-photoserve.apk", icon: "icons/applet-photo-serve.svg" },
-  { id: "cupcuppercuppers", name: "Cup-Cupper-Cuppers", desc: "Case-picking shell game — pick the cup that wins.", apk: "maru-cupcuppercuppers.apk", icon: "icons/applet-cup-cupper-cuppers.svg" },
-  { id: "daelornodael", name: "Dael or No Dael", desc: "Deal or No Deal clone with banker offers and swaps.", apk: "maru-daelornodael.apk", icon: "icons/applet-dael.svg" },
-  { id: "tupgradesolver", name: "TUP Grade Solver", desc: "Score-target calculator for TUP grading.", apk: "maru-tupgradesolver.apk", icon: "icons/applet-tup-grade.svg" },
-  { id: "schededit", name: "SchedEdit", desc: "Weekly class planner with shared account sync and reminders.", apk: "maru-schededit.apk", icon: "icons/applet-schededit.svg" },
+  { id: "photoserve", name: "PhotoServe", desc: "Desktop print workstation for 4R photo layouts and export.", apk: "maru-photoserve.apk", icon: "applet-photo-serve.svg" },
+  { id: "cupcuppercuppers", name: "Cup-Cupper-Cuppers", desc: "Case-picking shell game — pick the cup that wins.", apk: "maru-cupcuppercuppers.apk", icon: "applet-cup-cupper-cuppers.svg" },
+  { id: "daelornodael", name: "Dael or No Dael", desc: "Deal or No Deal clone with banker offers and swaps.", apk: "maru-daelornodael.apk", icon: "applet-dael.svg" },
+  { id: "tupgradesolver", name: "TUP Grade Solver", desc: "Score-target calculator for TUP grading.", apk: "maru-tupgradesolver.apk", icon: "applet-tup-grade.svg" },
+  { id: "schededit", name: "SchedEdit", desc: "Weekly class planner with shared account sync and reminders.", apk: "maru-schededit.apk", icon: "applet-schededit.svg" },
 ];
 
 /* ---------- types ---------- */
