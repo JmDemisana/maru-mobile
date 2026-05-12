@@ -6,15 +6,13 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; }
-body { min-height: 100dvh; }
+html, body { margin: 0; padding: 0; height: 100%; overflow: visible; }
 
 .link-shell {
-  min-height: 100dvh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  padding: calc(env(safe-area-inset-top, 0px) + 0.5rem) 0 calc(env(safe-area-inset-bottom, 0px));
-  overflow: hidden;
+  padding: calc(env(safe-area-inset-top, 0px) + 0.5rem) 0.5rem calc(env(safe-area-inset-bottom, 0px));
 }
 
 #link-content {

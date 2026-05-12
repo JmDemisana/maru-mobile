@@ -180,7 +180,8 @@ public final class HelperStorage {
             return DEFAULT_API_ORIGIN;
         }
 
-        return shouldUseProductionFallback(storedOrigin)
+        return shouldUseProductionFallback(storedOrigin) ||
+            shouldUseDetectorOriginFallback(storedOrigin)
             ? DEFAULT_API_ORIGIN
             : storedOrigin;
     }
@@ -264,6 +265,26 @@ public final class HelperStorage {
 
             String normalizedHost = host.trim().toLowerCase();
             return normalizedHost.equals("maru-website.onrender.com");
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    private static boolean shouldUseDetectorOriginFallback(String serverOrigin) {
+        try {
+            Uri parsed = Uri.parse(serverOrigin);
+            String host = parsed.getHost();
+            if (host == null) {
+                return true;
+            }
+
+            Uri publicSite = Uri.parse(DEFAULT_PUBLIC_SITE_ORIGIN);
+            String publicHost = publicSite.getHost();
+            if (publicHost == null) {
+                return false;
+            }
+
+            return host.trim().equalsIgnoreCase(publicHost.trim());
         } catch (Exception ignored) {
             return true;
         }

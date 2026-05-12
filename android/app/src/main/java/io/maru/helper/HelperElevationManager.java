@@ -2,6 +2,7 @@ package io.maru.helper;
 
 import android.content.Context;
 import android.net.Uri;
+import android.util.Log;
 
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.messaging.FirebaseMessaging;
@@ -19,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 public final class HelperElevationManager {
+    private static final String TAG = "HelperElevationManager";
     private static final String ACTION_COMPLETE_NATIVE_HANDOFF =
         "complete_native_elevation_app_handoff";
     private static final String ACTION_GET_HELPER_DEVICES = "get_helper_devices";
@@ -156,6 +158,13 @@ public final class HelperElevationManager {
         }
 
         JSONObject response = postSubscriptionRoute(context, payload, authToken);
+        if (!response.has("success") && response.has("devices")) {
+            try {
+                response.put("success", true);
+            } catch (Exception ignored) {
+                // Best effort payload.
+            }
+        }
         handleAuthFailureIfNeeded(context, response);
         return response;
     }
@@ -326,10 +335,7 @@ public final class HelperElevationManager {
         OutputStream outputStream = null;
 
         try {
-            String serverOrigin = HelperStorage.getStoredServerOrigin(context);
-            if (serverOrigin == null || serverOrigin.isEmpty()) {
-                serverOrigin = HelperStorage.resolveDetectorServerOrigin(context);
-            }
+            String serverOrigin = HelperStorage.resolveDetectorServerOrigin(context);
             if (serverOrigin == null || serverOrigin.isEmpty()) {
                 throw new IllegalStateException("No helper backend is saved on this phone yet.");
             }
@@ -362,6 +368,10 @@ public final class HelperElevationManager {
                     ? new JSONObject()
                     : new JSONObject(rawResponse);
             response.put("_httpStatus", statusCode);
+            Log.d(
+                TAG,
+                "POST " + path + " -> " + statusCode + " @ " + serverOrigin
+            );
             if (statusCode >= 200 && statusCode < 300) {
                 response.put("success", response.optBoolean("success", true));
                 return response;
@@ -375,6 +385,7 @@ public final class HelperElevationManager {
             }
             return response;
         } catch (Exception error) {
+            Log.e(TAG, "POST " + path + " failed.", error);
             try {
                 failure.put("success", false);
                 failure.put(

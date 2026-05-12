@@ -402,7 +402,9 @@ public class SettingsFragment extends Fragment {
         if (installed) {
             schedEditButton.setText("Open SchedEdit");
             schedEditButton.setEnabled(true);
-            schedEditNoteText.setText("Reminder editor is installed on this phone.");
+            schedEditNoteText.setText(
+                "SchedEdit is installed. Maru Link follows its synced reminders here."
+            );
             return;
         }
 
@@ -429,7 +431,9 @@ public class SettingsFragment extends Fragment {
 
         schedEditButton.setText("Get SchedEdit");
         schedEditButton.setEnabled(true);
-        schedEditNoteText.setText("SchedEdit reminders live in the separate native app.");
+        schedEditNoteText.setText(
+            "Maru Link follows reminders from the separate SchedEdit app."
+        );
     }
 
     private void bindElevationState() {

@@ -138,6 +138,26 @@ public final class HelperMediaSessionMonitor {
         }
     }
 
+    public boolean isPlaybackActive() {
+        synchronized (lock) {
+            return snapshot.playing;
+        }
+    }
+
+    public String getCurrentTrackKey() {
+        synchronized (lock) {
+            if (snapshot.title == null || snapshot.artist == null) {
+                return "";
+            }
+
+            return HelperLastFmNowPlayingNotificationManager.buildTrackKeyForComparison(
+                snapshot.title,
+                snapshot.artist,
+                snapshot.album
+            );
+        }
+    }
+
     public byte[] getArtworkJpegBytes() {
         synchronized (lock) {
             return snapshot.artworkJpegBytes == null
@@ -195,6 +215,8 @@ public final class HelperMediaSessionMonitor {
 
     private void refreshActiveController() {
         mainHandler.post(() -> {
+            Context notificationContext = null;
+            MediaSnapshot nextSnapshot = null;
             synchronized (lock) {
                 if (!isNotificationListenerEnabledLocked()) {
                     unregisterSessionsListenerLocked();
@@ -207,19 +229,32 @@ public final class HelperMediaSessionMonitor {
                 MediaController nextController = pickBestControllerLocked();
                 if (activeController == nextController) {
                     snapshot = buildSnapshotLocked(activeController);
-                    return;
-                }
-
-                unregisterControllerLocked();
-                activeController = nextController;
-                if (activeController != null) {
-                    try {
-                        activeController.registerCallback(controllerCallback, mainHandler);
-                    } catch (Exception ignored) {
-                        activeController = null;
+                    nextSnapshot = snapshot;
+                    notificationContext = appContext;
+                } else {
+                    unregisterControllerLocked();
+                    activeController = nextController;
+                    if (activeController != null) {
+                        try {
+                            activeController.registerCallback(controllerCallback, mainHandler);
+                        } catch (Exception ignored) {
+                            activeController = null;
+                        }
                     }
+                    snapshot = buildSnapshotLocked(activeController);
+                    nextSnapshot = snapshot;
+                    notificationContext = appContext;
                 }
-                snapshot = buildSnapshotLocked(activeController);
+            }
+
+            if (notificationContext != null && nextSnapshot != null) {
+                HelperLastFmNowPlayingNotificationManager.maybeShowNowPlayingNotification(
+                    notificationContext,
+                    nextSnapshot.title,
+                    nextSnapshot.artist,
+                    nextSnapshot.album,
+                    nextSnapshot.playing
+                );
             }
         });
     }
@@ -327,6 +362,10 @@ public final class HelperMediaSessionMonitor {
                 metadata.getString(MediaMetadata.METADATA_KEY_ARTIST),
                 metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
                 metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            );
+            next.album = firstNonBlank(
+                metadata.getString(MediaMetadata.METADATA_KEY_ALBUM),
+                metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION)
             );
             next.artworkJpegBytes = buildArtworkBytes(metadata);
             next.artworkCacheKey = next.artworkJpegBytes == null
@@ -511,6 +550,7 @@ public final class HelperMediaSessionMonitor {
     }
 
     private static final class MediaSnapshot {
+        String album;
         String appPackage;
         String appLabel;
         String artist;

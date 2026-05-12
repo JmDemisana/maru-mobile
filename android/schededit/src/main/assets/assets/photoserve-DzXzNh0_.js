@@ -1,0 +1,1 @@
+import"./modulepreload-polyfill-B5Qt9EMX.js";document.getElementById("applet-title").textContent="PhotoServe";document.getElementById("applet-desc").textContent="4R photo layouts, export, and direct print work.";

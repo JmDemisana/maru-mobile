@@ -99,13 +99,6 @@ public class AppsFragment extends Fragment {
     private List<AppItem> buildApps() {
         List<AppItem> apps = new ArrayList<>();
         apps.add(new AppItem(
-            "PhotoServe",
-            "Desktop print workstation",
-            R.drawable.ic_photoserve,
-            "io.maru.photoserve",
-            "maru-photoserve.apk"
-        ));
-        apps.add(new AppItem(
             "Cup-Cupper-Cuppers",
             "Case-picking shell game",
             R.drawable.ic_cup,

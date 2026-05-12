@@ -465,10 +465,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public String getServerOrigin() {
-        String storedOrigin = HelperStorage.getStoredServerOrigin(this);
-        return storedOrigin == null || storedOrigin.isEmpty()
-            ? HelperStorage.resolveDetectorServerOrigin(this)
-            : storedOrigin;
+        return HelperStorage.resolveDetectorServerOrigin(this);
     }
 
     public String getInstallationId() {

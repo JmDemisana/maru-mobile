@@ -20,6 +20,14 @@ public final class HelperLastFmRoutePinger {
     }
 
     public static boolean pingNowPlayingRoute(Context context) throws Exception {
+        HelperMediaSessionMonitor mediaSessionMonitor = HelperMediaSessionMonitor.getInstance();
+        String localTrackKey = mediaSessionMonitor.getCurrentTrackKey();
+        if (mediaSessionMonitor.isPlaybackActive() && !localTrackKey.isEmpty()) {
+            // Local playback already drives the smart-band alert, so don't let the
+            // Last.fm fallback path double-post the same song from the server.
+            return true;
+        }
+
         String installationId = HelperStorage.getInstallationId(context);
         String serverOrigin = HelperStorage.resolveDetectorServerOrigin(context);
 

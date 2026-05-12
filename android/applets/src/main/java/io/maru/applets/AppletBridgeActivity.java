@@ -77,6 +77,35 @@ public abstract class AppletBridgeActivity extends BridgeActivity {
         }
     }
 
+    private void launchLinkSettingsPanel(String rawPanel) {
+        String serverOrigin = callLinkSharedState(LINK_SERVER_ORIGIN_METHOD);
+        String panel = rawPanel == null ? "" : rawPanel.trim();
+        Uri.Builder builder = new Uri.Builder()
+            .scheme(LINK_SCHEME)
+            .authority(LINK_HOST)
+            .appendQueryParameter("action", "open-settings");
+
+        if (!panel.isEmpty()) {
+            builder.appendQueryParameter("panel", panel);
+        }
+
+        if (serverOrigin != null && !serverOrigin.trim().isEmpty()) {
+            builder.appendQueryParameter("siteOrigin", serverOrigin.trim());
+        }
+
+        Intent launchIntent = new Intent(Intent.ACTION_VIEW, builder.build());
+        launchIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                startActivity(launchIntent);
+            } catch (Exception ignored) {
+                // Ignore handoff failures and leave the current app visible.
+            }
+        });
+    }
+
     private final class AppletNativeBridge {
         @JavascriptInterface
         public String getSharedAuthUser() {
@@ -90,28 +119,12 @@ public abstract class AppletBridgeActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void openLinkAccountSync() {
-            String serverOrigin = getServerOrigin();
-            Uri.Builder builder = new Uri.Builder()
-                .scheme(LINK_SCHEME)
-                .authority(LINK_HOST)
-                .appendQueryParameter("action", "open-settings")
-                .appendQueryParameter("panel", LINK_SETTINGS_PANEL_ACCOUNT_SYNC);
+            launchLinkSettingsPanel(LINK_SETTINGS_PANEL_ACCOUNT_SYNC);
+        }
 
-            if (serverOrigin != null && !serverOrigin.trim().isEmpty()) {
-                builder.appendQueryParameter("siteOrigin", serverOrigin.trim());
-            }
-
-            Intent launchIntent = new Intent(Intent.ACTION_VIEW, builder.build());
-            launchIntent.addCategory(Intent.CATEGORY_BROWSABLE);
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-            new Handler(Looper.getMainLooper()).post(() -> {
-                try {
-                    startActivity(launchIntent);
-                } catch (Exception ignored) {
-                    // Ignore handoff failures and leave the current app visible.
-                }
-            });
+        @JavascriptInterface
+        public void openLinkSettingsPanel(String rawPanel) {
+            launchLinkSettingsPanel(rawPanel);
         }
 
         @JavascriptInterface
