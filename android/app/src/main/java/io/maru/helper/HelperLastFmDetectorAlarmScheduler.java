@@ -27,7 +27,8 @@ public final class HelperLastFmDetectorAlarmScheduler {
     public static void schedule(Context context) {
         String installationId = HelperStorage.getInstallationId(context);
         String serverOrigin = HelperStorage.resolveDetectorServerOrigin(context);
-        if (installationId.isEmpty() || serverOrigin.isEmpty()) {
+        if (installationId.isEmpty() || serverOrigin.isEmpty() ||
+            !HelperLastFmDetectorController.shouldRun(context)) {
             return;
         }
 

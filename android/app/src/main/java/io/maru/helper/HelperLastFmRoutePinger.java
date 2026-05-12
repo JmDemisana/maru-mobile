@@ -19,12 +19,12 @@ public final class HelperLastFmRoutePinger {
     private HelperLastFmRoutePinger() {
     }
 
-    public static void pingNowPlayingRoute(Context context) throws Exception {
+    public static boolean pingNowPlayingRoute(Context context) throws Exception {
         String installationId = HelperStorage.getInstallationId(context);
         String serverOrigin = HelperStorage.resolveDetectorServerOrigin(context);
 
         if (installationId.isEmpty() || serverOrigin.isEmpty()) {
-            return;
+            return false;
         }
 
         String encodedInstallationId = URLEncoder.encode(
@@ -41,10 +41,11 @@ public final class HelperLastFmRoutePinger {
 
         JSONObject detectorPayload = readJsonResponse(requestUrl);
         if (detectorPayload == null || !detectorPayload.optBoolean("active", false)) {
-            return;
+            return false;
         }
 
         maybeNudgeExternalBackend(context, serverOrigin);
+        return true;
     }
 
     private static void maybeNudgeExternalBackend(Context context, String serverOrigin)

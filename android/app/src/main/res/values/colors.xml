@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background_dark">#0B1020</color>
+    <color name="nav_background">#080D18</color>
+    <color name="nav_item_active">#7A9BFF</color>
+    <color name="nav_item_inactive">#8099B3</color>
+    <color name="text_primary">#F4F7FF</color>
+    <color name="text_secondary">#99A8BF</color>
+    <color name="card_background">#0F1525</color>
+    <color name="card_border">#1B2035</color>
+    <color name="button_background">#1A2540</color>
+    <color name="button_active">#2A3A60</color>
+    <color name="accent_green">#7AFFA0</color>
+    <color name="accent_yellow">#FFBF5C</color>
+    <color name="red_status">#FF8F9E</color>
+</resources>

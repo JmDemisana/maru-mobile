@@ -13,8 +13,6 @@ public class HelperLastFmDetectorBootReceiver extends BroadcastReceiver {
             return;
         }
 
-        HelperLastFmForegroundService.start(context);
-        HelperLastFmDetectorWorker.schedule(context);
-        HelperLastFmDetectorAlarmScheduler.schedule(context);
+        HelperLastFmDetectorController.sync(context);
     }
 }

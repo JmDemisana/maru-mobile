@@ -34,6 +34,10 @@ public class HelperLastFmForegroundService extends Service {
     private ScheduledExecutorService pollExecutor;
 
     public static void start(Context context) {
+        if (context == null || !HelperLastFmDetectorController.shouldRun(context)) {
+            return;
+        }
+
         Intent intent = new Intent(context, HelperLastFmForegroundService.class);
         intent.setAction(ACTION_START);
 
@@ -60,6 +64,7 @@ public class HelperLastFmForegroundService extends Service {
         super.onCreate();
         ensureNotificationChannel();
         ensureAlertNotificationChannel();
+        startForegroundInternal();
     }
 
     @Override
@@ -76,7 +81,6 @@ public class HelperLastFmForegroundService extends Service {
             return START_NOT_STICKY;
         }
 
-        startForegroundInternal();
         startPolling();
         HelperLastFmDetectorAlarmScheduler.schedule(this);
         return START_STICKY;
@@ -95,8 +99,7 @@ public class HelperLastFmForegroundService extends Service {
     }
 
     private boolean hasDetectorContext() {
-        return !HelperStorage.getInstallationId(this).isEmpty() &&
-            !HelperStorage.resolveDetectorServerOrigin(this).isEmpty();
+        return HelperLastFmDetectorController.shouldRun(this);
     }
 
     private void startForegroundInternal() {

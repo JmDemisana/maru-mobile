@@ -3,15 +3,28 @@ package io.maru.helper;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.util.Log;
+
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
+
+import java.util.UUID;
 
 public final class HelperStorage {
-    private static final String DEFAULT_SITE_ORIGIN = "https://maru-website.onrender.com";
+    private static final String DEFAULT_API_ORIGIN = "https://maru-website.onrender.com";
+    private static final String DEFAULT_PUBLIC_SITE_ORIGIN =
+        "https://maruchansquigle.vercel.app";
+    private static final String KEY_ELEVATION_LASTFM_ENABLED =
+        "helper-elevation-lastfm-enabled";
+    private static final String KEY_ELEVATION_TOKEN = "helper-elevation-token";
     private static final String KEY_INSTALLATION_ID = "helper-installation-id";
     private static final String KEY_LAST_RENDER_NUDGE_CHECK_AT =
         "helper-last-render-nudge-check-at";
     private static final String KEY_SHARED_AUTH_USER = "helper-shared-auth-user";
     private static final String KEY_SERVER_ORIGIN = "helper-server-origin";
     private static final String PREFS_NAME = "maru-helper-native";
+    private static final String SECURE_PREFS_NAME = "maru-helper-secure";
+    private static final String TAG = "HelperStorage";
 
     private HelperStorage() {
     }
@@ -20,8 +33,37 @@ public final class HelperStorage {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
+    private static SharedPreferences getSecurePrefs(Context context) {
+        try {
+            MasterKey masterKey = new MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build();
+            return EncryptedSharedPreferences.create(
+                context,
+                SECURE_PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            );
+        } catch (Exception error) {
+            Log.e(TAG, "Couldn't open secure helper storage.", error);
+            return null;
+        }
+    }
+
     public static String getInstallationId(Context context) {
         return getPrefs(context).getString(KEY_INSTALLATION_ID, "").trim();
+    }
+
+    public static String ensureInstallationId(Context context) {
+        String installationId = getInstallationId(context);
+        if (!installationId.isEmpty()) {
+            return installationId;
+        }
+
+        String nextInstallationId = UUID.randomUUID().toString();
+        persistInstallationId(context, nextInstallationId);
+        return nextInstallationId;
     }
 
     public static void persistInstallationId(Context context, String rawInstallationId) {
@@ -83,15 +125,77 @@ public final class HelperStorage {
             .apply();
     }
 
+    public static boolean isElevationLastFmEnabled(Context context) {
+        return getPrefs(context).getBoolean(KEY_ELEVATION_LASTFM_ENABLED, false);
+    }
+
+    public static void persistElevationLastFmEnabled(Context context, boolean enabled) {
+        getPrefs(context)
+            .edit()
+            .putBoolean(KEY_ELEVATION_LASTFM_ENABLED, enabled)
+            .apply();
+    }
+
+    public static String getElevationToken(Context context) {
+        SharedPreferences securePrefs = getSecurePrefs(context);
+        if (securePrefs == null) {
+            return "";
+        }
+
+        String token = securePrefs.getString(KEY_ELEVATION_TOKEN, "");
+        return token == null ? "" : token.trim();
+    }
+
+    public static boolean canUseSecureElevationStorage(Context context) {
+        return getSecurePrefs(context) != null;
+    }
+
+    public static boolean persistElevationToken(Context context, String rawToken) {
+        SharedPreferences securePrefs = getSecurePrefs(context);
+        if (securePrefs == null) {
+            return false;
+        }
+
+        String token = rawToken == null ? "" : rawToken.trim();
+        if (token.isEmpty()) {
+            securePrefs.edit().remove(KEY_ELEVATION_TOKEN).apply();
+            return true;
+        }
+
+        securePrefs.edit().putString(KEY_ELEVATION_TOKEN, token).apply();
+        return true;
+    }
+
+    public static void clearElevationState(Context context) {
+        SharedPreferences securePrefs = getSecurePrefs(context);
+        if (securePrefs != null) {
+            securePrefs.edit().remove(KEY_ELEVATION_TOKEN).apply();
+        }
+        persistElevationLastFmEnabled(context, false);
+    }
+
     public static String resolveDetectorServerOrigin(Context context) {
         String storedOrigin = getStoredServerOrigin(context);
         if (storedOrigin == null || storedOrigin.isEmpty()) {
-            return DEFAULT_SITE_ORIGIN;
+            return DEFAULT_API_ORIGIN;
         }
 
         return shouldUseProductionFallback(storedOrigin)
-            ? DEFAULT_SITE_ORIGIN
+            ? DEFAULT_API_ORIGIN
             : storedOrigin;
+    }
+
+    public static String resolvePublicSiteOrigin(Context context) {
+        String storedOrigin = getStoredServerOrigin(context);
+        if (storedOrigin == null || storedOrigin.isEmpty()) {
+            return DEFAULT_PUBLIC_SITE_ORIGIN;
+        }
+
+        if (shouldUseProductionFallback(storedOrigin) || shouldUsePublicSiteFallback(storedOrigin)) {
+            return DEFAULT_PUBLIC_SITE_ORIGIN;
+        }
+
+        return storedOrigin;
     }
 
     private static String normalizeServerOrigin(String rawServerOrigin) {
@@ -148,5 +252,20 @@ public final class HelperStorage {
         }
 
         return false;
+    }
+
+    private static boolean shouldUsePublicSiteFallback(String serverOrigin) {
+        try {
+            Uri parsed = Uri.parse(serverOrigin);
+            String host = parsed.getHost();
+            if (host == null) {
+                return true;
+            }
+
+            String normalizedHost = host.trim().toLowerCase();
+            return normalizedHost.equals("maru-website.onrender.com");
+        } catch (Exception ignored) {
+            return true;
+        }
     }
 }

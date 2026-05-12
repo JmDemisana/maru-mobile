@@ -37,7 +37,8 @@ public class HelperLastFmDetectorWorker extends Worker {
     public static void schedule(Context context, long delayMinutes) {
         String installationId = HelperStorage.getInstallationId(context);
         String serverOrigin = HelperStorage.resolveDetectorServerOrigin(context);
-        if (installationId.isEmpty() || serverOrigin.isEmpty()) {
+        if (installationId.isEmpty() || serverOrigin.isEmpty() ||
+            !HelperLastFmDetectorController.shouldRun(context)) {
             return;
         }
 
@@ -63,9 +64,18 @@ public class HelperLastFmDetectorWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
+        if (!HelperLastFmDetectorController.shouldRun(getApplicationContext())) {
+            return Result.success();
+        }
+
         try {
             HelperLastFmForegroundService.start(getApplicationContext());
-            HelperLastFmRoutePinger.pingNowPlayingRoute(getApplicationContext());
+            boolean active = HelperLastFmRoutePinger.pingNowPlayingRoute(
+                getApplicationContext()
+            );
+            if (!active) {
+                HelperLastFmDetectorController.disable(getApplicationContext());
+            }
         } catch (Exception error) {
             Log.w(LOG_TAG, "Background Last.fm detector ping failed.", error);
         }
